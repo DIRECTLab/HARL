@@ -4,6 +4,7 @@ from harl.utils.models_tools import get_init_method
 
 """neuron modules."""
 
+#We will sidelin ethis for now and just use the base with RNN
 #TODO make it the model that can be used
 #TODO add in all parts of the neuron (mixing, activation, processing, etc)
 

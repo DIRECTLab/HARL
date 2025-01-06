@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 from harl.utils.envs_tools import check
-from harl.models.base.neuron import Neuron
+from harl.models.base.neuron import neuronBase
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
 
-#this needs more work to be intergrated but might not even be required
+#TODO this needs more work to be intergrated but might not even be required
 class StochasticNeuronPolicy(nn.Module):
     """Stochastic policy model. Outputs actions given observations."""
 
@@ -30,7 +30,7 @@ class StochasticNeuronPolicy(nn.Module):
 
         obs_shape = get_shape_from_obs_space(obs_space)
 
-        self.neuron = Neuron(args, obs_shape)
+        self.neuron = neuronBase(args, obs_shape)
 
         self.act = ACTLayer(
             action_space,

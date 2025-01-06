@@ -38,16 +38,18 @@ class neuronWrapper(object):
 
         self.num_unwrapped_agents = self._unwrapped.n_agents
         self.position_dims = neuron_args["position_dims"]
-        self.neuron_input = neuron_args["model"]["neuron_input"]
-        self.neuron_output = self.neuron_input + self.position_dims + 1
+        self.neuron_bandwidth = neuron_args["model"]["neuron_bandwidth"]
+        self.neuron_input = self.neuron_bandwidth + self.position_dims
+        self.neuron_output = self.neuron_bandwidth + self.position_dims + 2
         self.speed_factor = neuron_args["speed_factor"]
+        self.step_count = 0
         self.num_hidden_neurons_per_agent = neuron_args["num_hidden_neurons_per_agent"]
 
         self.enviroment_observation_space = self._env.observation_space
         self.enviroment_action_space = self._env.action_space
 
-        self.num_visible_input_neurons = self.enviroment_observation_space[0].shape[0]//self.neuron_input + (1 if self.enviroment_observation_space[0].shape[0]%self.neuron_input != 0 else 0)
-        self.num_visible_output_neurons = self.enviroment_action_space[0].shape[0]//self.neuron_input + (1 if self.enviroment_action_space[0].shape[0]%self.neuron_input != 0 else 0)
+        self.num_visible_input_neurons = self.enviroment_observation_space[0].shape[0]//self.neuron_bandwidth + (1 if self.enviroment_observation_space[0].shape[0]%self.neuron_bandwidth != 0 else 0)
+        self.num_visible_output_neurons = self.enviroment_action_space[0].shape[0]//self.neuron_bandwidth + (1 if self.enviroment_action_space[0].shape[0]%self.neuron_bandwidth != 0 else 0)
 
         self._observation_space = [spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_input,),dtype=np.float32) for _ in range(self.n_agents)]
         self._action_space = [spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_output,),dtype=np.float32) for _ in range(self.n_agents)]
@@ -93,7 +95,7 @@ class neuronWrapper(object):
         """
         Converts the observation from the enviroment to the observation for the neurons
         """
-
+        #TODO add in prev position
         return self._reshape_obs(np.array(obs))
     
     def _convert_actions(self, actions) -> Tuple[torch.Tensor, torch.Tensor, Any]:
@@ -102,7 +104,7 @@ class neuronWrapper(object):
         """
 
         env_actions = actions[:,:,:self.neuron_input]
-        neron_actions = actions[:,:,self.neuron_input:self.neuron_output]
+        neron_actions = actions[:,:,self.neuron_bandwidth:self.neuron_output]
 
         env_actions = self._reshape_actions(np.array(env_actions))
 
@@ -113,15 +115,15 @@ class neuronWrapper(object):
         Will reset/setup the neurons states and the enviroment states. The enviroment is also reset in the step function
         """
 
-        self._global_positions = torch.rand((self.num_unwrapped_agents,self.total_neurons_per_agent,self.position_dims))
-        self._global_connections = torch.rand((self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))
+        self._global_positions = torch.rand((self.n_agents,self.position_dims))
+        self._global_connections = torch.rand((self.n_agents,self.n_agents))
 
-        obs, _, other = self._env.reset()
+        obs, _, self.other = self._env.reset()
 
-        out_obs = self._convert_observation(obs)
-        out_shared = self._convert_observation(obs)
+        self.out_obs = self._convert_observation(obs)
+        self.out_shared = self._convert_observation(obs)
 
-        return out_obs, out_shared, other
+        return self.out_obs, self.out_shared, self.other
 
     def step(self, actions: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
         """
@@ -130,15 +132,21 @@ class neuronWrapper(object):
 
         env_actions, neron_actions = self._convert_actions(actions)
 
-        obs, share_obs, rewards,dones,infos,available_actions = self._env.step(env_actions)
+        #TODO update neuron states
 
-        out_obs = self._convert_observation(obs)
-        out_shared = self._convert_observation(obs)
+        self.step_count += 1
 
-        rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
-        dones = np.repeat(dones, repeats=self.total_neurons_per_agent, axis=1)
+        if self.step_count == self.speed_factor:
+            obs, self.share_obs, rewards,dones, self.infos, self.available_actions = self._env.step(env_actions)
+            self.step_count = 0
+        
+            self.out_obs = self._convert_observation(obs)
+            self.out_shared = self._convert_observation(obs)
 
-        return out_obs, out_shared, rewards, dones, infos, available_actions
+            self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
+            self.dones = np.repeat(dones, repeats=self.total_neurons_per_agent, axis=1)
+
+        return self.out_obs, self.out_shared, self.rewards, self.dones, self.infos, self.available_actions
 
     def state(self) -> torch.Tensor:
         pass
