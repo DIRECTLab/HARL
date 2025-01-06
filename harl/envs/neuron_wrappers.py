@@ -115,8 +115,8 @@ class neuronWrapper(object):
         Will reset/setup the neurons states and the enviroment states. The enviroment is also reset in the step function
         """
 
-        self._global_positions = torch.rand((self.n_agents,self.position_dims))
-        self._global_connections = torch.rand((self.n_agents,self.n_agents))
+        self._global_positions = torch.rand((self.num_unwrapped_agents,self.num_hidden_neurons_per_agent,self.position_dims))
+        self._global_connections = torch.rand((self.num_unwrapped_agents,self.num_hidden_neurons_per_agent,self.num_hidden_neurons_per_agent))
 
         obs, _, self.other = self._env.reset()
 
@@ -133,6 +133,17 @@ class neuronWrapper(object):
         env_actions, neron_actions = self._convert_actions(actions)
 
         #TODO update neuron states
+        #TODO find good way to 
+
+        if neron_actions.shape[0] != self._global_connections.shape[0] or self._global_connections.shape[0] != self._global_connections.shape[1]:
+            raise ValueError("Shapes of input arrays are not compatible.")
+
+        weights_sum = self._global_connections.sum(axis=1, keepdims=True)
+        if np.any(weights_sum == 0):
+            raise ValueError("Weights cannot sum to zero for any row.")
+        normalized_weights = self._global_connections / weights_sum
+
+        new_neuron_observations = np.dot(normalized_weights, neron_actions)
 
         self.step_count += 1
 
