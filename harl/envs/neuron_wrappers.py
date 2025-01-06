@@ -16,6 +16,8 @@ from typing import Any, Mapping, Sequence, Tuple, Union
 #TODO create single agent test env
 #TODO single agent case
 
+#TODO add in position and connection information
+
 class neuronWrapper(object):
     """
     This will transform a single agent or multi agent enviroment into a neuron multi agent enviroment.
