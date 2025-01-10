@@ -1,6 +1,6 @@
-model:
-  name: base
-  neuron_bandwidth: 3
+neuron_bandwidth: 3
 num_hidden_neurons_per_agent: 1
 position_dims: 2
 speed_factor: 1
+exp_decay_scale: .5
+max_connection_change: .1
