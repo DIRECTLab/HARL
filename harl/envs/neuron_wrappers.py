@@ -99,7 +99,6 @@ class neuronWrapper(object):
         """
         Converts the observation from the enviroment to the observation for the neurons
         """
-        #TODO add in prev position
         return self._reshape_obs(np.array(obs), prev_state)
     
     def _convert_actions(self, actions) -> Tuple[np.ndarray, np.ndarray, Any]:
@@ -119,18 +118,17 @@ class neuronWrapper(object):
         Will reset/setup the neurons states and the enviroment states. The enviroment is also reset in the step function
         """
 
-        obs, _, self.other = self._env.reset()
+        obs, _, other = self._env.reset()
 
         self._global_positions = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.position_dims))
         self._global_connections = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))
 
-        #TODO add in some sort of initilization funtion
-        inital_prev_state = np.zeros((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input), dtype=obs.dtype)
+        inital_state = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input), dtype=obs.dtype)
 
-        self.out_obs = self._convert_observation(obs, inital_prev_state)
-        self.out_shared = self._convert_observation(obs, inital_prev_state)
+        self.out_obs = self._convert_observation(obs, inital_state)
+        self.out_shared = self._convert_observation(obs, inital_state)
 
-        return self.out_obs, self.out_shared, self.other
+        return self.out_obs, self.out_shared, other
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any]:
         """
@@ -152,7 +150,7 @@ class neuronWrapper(object):
         weights_sum[weights_sum == 0] = 1
         normalized_weights = self._global_connections / weights_sum
 
-        new_neuron_signals = np.matmul(normalized_weights, neron_signal) #TODO
+        new_neuron_signals = np.matmul(normalized_weights, neron_signal)
 
         pairwise_distances = self._pairwise_distances(neron_connect_positions,self._global_positions)
 
@@ -169,16 +167,22 @@ class neuronWrapper(object):
         if self.step_count == self.speed_factor:
             self.step_count = 0
 
-            obs, self.share_obs, rewards,dones, self.infos, self.available_actions = self._env.step(env_actions)
+            obs, self.share_obs, rewards, dones, self.infos, self.available_actions = self._env.step(env_actions)
             
+            if dones.any():
+                obs, _, other = self._env.reset()
         
             self.out_obs = self._convert_observation(obs,new_neuron_input)
             self.out_shared = self._convert_observation(obs,new_neuron_input)
 
             self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
-            self.dones = np.repeat(dones, repeats=self.total_neurons_per_agent, axis=1)
 
-        return self.out_obs, self.out_shared, self.rewards, self.dones, self.infos, self.available_actions
+            return self.out_obs, self.out_shared, self.rewards, np.zeros_like(self.rewards), self.infos, self.available_actions
+        
+        else:
+
+            return new_neuron_input, new_neuron_input, self.rewards, np.zeros_like(self.rewards), self.infos, self.available_actions
+        
     
     def _pairwise_distances(self, array1, array2):
 
