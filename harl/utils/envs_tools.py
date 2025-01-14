@@ -261,9 +261,9 @@ def _make_render_env(env_name, seed, env_args):
         from harl.envs.isaaclab.Isaac_lab_env import IsaacLabEnv
 
         env = IsaacLabEnv({"n_threads": 64, **env_args})
-        manual_render = False  # dexhands renders automatically
+        manual_render = False
         manual_expand_dims = (
-            False  # dexhands uses parallel envs, thus dimension is already expanded
+            False
         )
         manual_delay = False
         env_num = 64

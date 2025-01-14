@@ -415,7 +415,7 @@ class IsaacLabWrapper(object):
         obs = torch.stack(obs, axis=1)
 
         s_obs = [self._unwrapped.state() for _ in range(self._unwrapped.num_agents)]
-        if np.any(s_obs):
+        if s_obs[0] != None:
             s_obs = torch.stack(s_obs, axis=1)
         else:
             s_obs = torch.zeros((obs.shape[0],obs.shape[1],0))
