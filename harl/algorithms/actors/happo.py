@@ -62,6 +62,9 @@ class HAPPO(OnPolicyBase):
             active_masks_batch,
         )
 
+        #TODO Fix evaluation step
+        #TODO FIX the video render on christopohers computer for o the Isaac lab HARL
+
         # actor update
         imp_weights = getattr(torch, self.action_aggregation)(
             torch.exp(action_log_probs - old_action_log_probs_batch),

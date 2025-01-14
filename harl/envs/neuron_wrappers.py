@@ -123,7 +123,7 @@ class neuronWrapper(object):
         self._global_positions = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.position_dims))
         self._global_connections = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))
 
-        inital_state = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input), dtype=obs.dtype)
+        inital_state = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input))
 
         self.out_obs = self._convert_observation(obs, inital_state)
         self.out_shared = self._convert_observation(obs, inital_state)
@@ -177,11 +177,11 @@ class neuronWrapper(object):
 
             self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
 
-            return self.out_obs, self.out_shared, self.rewards, np.zeros_like(self.rewards), self.infos, self.available_actions
+            return self.out_obs, self.out_shared, self.rewards, np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
         
         else:
 
-            return new_neuron_input, new_neuron_input, self.rewards, np.zeros_like(self.rewards), self.infos, self.available_actions
+            return new_neuron_input, new_neuron_input, self.rewards, np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
         
     
     def _pairwise_distances(self, array1, array2):
@@ -199,10 +199,11 @@ class neuronWrapper(object):
         pass
 
     def render(self, *args, **kwargs) -> Any:
+        #TODO visulize the neurons
         pass
 
     def close(self) -> None:
-        pass
+        self._env.close()
     
     @property
     def total_neurons_per_agent(self) -> int:
