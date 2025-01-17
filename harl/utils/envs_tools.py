@@ -53,6 +53,8 @@ def make_train_env(env_name, seed, n_threads, env_args):
 
         env = _make_train_env(env_name, seed, n_threads, env_args)
 
+        env_args["neuron_args"] = neuron_args
+
         return neuronWrapper(env, neuron_args=neuron_args)
     
     return _make_train_env(env_name, seed, n_threads, env_args)
@@ -64,6 +66,8 @@ def make_eval_env(env_name, seed, n_threads, env_args):
         neuron_args = env_args.pop("neuron_args")
 
         env = _make_eval_env(env_name, seed, n_threads, env_args)
+
+        env_args["neuron_args"] = neuron_args
 
         return neuronWrapper(env, neuron_args=neuron_args)
     
@@ -78,6 +82,8 @@ def make_render_env(env_name, seed, env_args):
         env, manual_render, manual_expand_dims, manual_delay, env_num = _make_render_env(
             env_name, seed, env_args
         )
+
+        env_args["neuron_args"] = neuron_args
 
         return neuronWrapper(env, neuron_args=neuron_args), manual_render, manual_expand_dims, manual_delay, env_num
     

@@ -48,6 +48,8 @@ class neuronWrapper(object):
         self.max_connection_change = neuron_args["max_connection_change"]
         self.step_count = 0
         self.num_hidden_neurons_per_agent = neuron_args["num_hidden_neurons_per_agent"]
+        self.reset_env_factor = neuron_args["reset_env_factor"]
+        self.reset_env_factor_count = 0
 
         self.enviroment_observation_space = self._env.observation_space
         self.enviroment_action_space = self._env.action_space
@@ -128,6 +130,10 @@ class neuronWrapper(object):
         self.out_obs = self._convert_observation(obs, inital_state)
         self.out_shared = self._convert_observation(obs, inital_state)
 
+        self.rewards = np.zeros((obs.shape[0],self.n_agents,1))
+        self.infos = [[{} for __ in range(self.num_unwrapped_agents)] for _ in range(obs.shape[0])]
+        self.available_actions = [None for _ in range(obs.shape[0])]
+
         return self.out_obs, self.out_shared, other
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any]:
@@ -168,20 +174,32 @@ class neuronWrapper(object):
             self.step_count = 0
 
             obs, self.share_obs, rewards, dones, self.infos, self.available_actions = self._env.step(env_actions)
-            
-            if dones.any():
-                obs, _, other = self._env.reset()
-        
-            self.out_obs = self._convert_observation(obs,new_neuron_input)
-            self.out_shared = self._convert_observation(obs,new_neuron_input)
 
             self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
 
-            return self.out_obs, self.out_shared, self.rewards, np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
+            if dones.any():
+                obs, _, other = self._env.reset()
+                self.reset_env_factor_count += 1
+
+                if self.reset_env_factor_count == self.reset_env_factor:
+                    dones = np.ones_like(self.rewards).squeeze(axis=-1)
+                    self.reset_env_factor_count = 0
+                else:
+                    dones = np.zeros_like(self.rewards).squeeze(axis=-1)
+            else:
+                dones = np.zeros_like(self.rewards).squeeze(axis=-1)
+
+            self.out_obs = self._convert_observation(obs,new_neuron_input)
+            self.out_shared = self._convert_observation(obs,new_neuron_input)
+
+            return self.out_obs, self.out_shared, self.rewards, dones, self.infos, self.available_actions
         
         else:
 
-            return new_neuron_input, new_neuron_input, self.rewards, np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
+            out_obs = new_neuron_input.reshape(new_neuron_input.shape[0], self.n_agents, self.neuron_input)
+            out_obs_shared = new_neuron_input.reshape(new_neuron_input.shape[0], self.n_agents, self.neuron_input)
+
+            return out_obs, out_obs_shared, np.zeros_like(self.rewards), np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
         
     
     def _pairwise_distances(self, array1, array2):

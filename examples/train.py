@@ -79,6 +79,7 @@ def main():
         env_args = all_config["env_args"]
     else:  # load config from corresponding yaml file
         algo_args, env_args, neuron_args = get_defaults_yaml_args(args["algo"], args["env"])
+
     update_args(unparsed_dict, algo_args, env_args)  # update args from command line
 
     if args["env"] == "dexhands":
@@ -89,7 +90,7 @@ def main():
         algo_args["eval"]["use_eval"] = False
         algo_args["train"]["episode_length"] = env_args["hands_episode_length"]
 
-    if args["use_neuron"]:
+    if args["use_neuron"] and args["load_config"] == "":
         env_args["neuron_args"] = neuron_args
 
     # start training
