@@ -590,5 +590,10 @@ class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
             if self.video_length > 0:
                 if self.recorded_frames > self.video_length:
                     self.close_video_recorder()
+                    print("end recording")
+
+        elif self._video_enabled():
+            self.start_video_recorder()
+            print("start recording")
 
         return observations, rewards, terminateds, truncateds, infos

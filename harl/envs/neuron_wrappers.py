@@ -42,7 +42,7 @@ class neuronWrapper(object):
         self.position_dims = neuron_args["position_dims"]
         self.neuron_bandwidth = neuron_args["neuron_bandwidth"]
         self.neuron_input = self.neuron_bandwidth + self.position_dims
-        self.neuron_output = self.neuron_bandwidth + self.position_dims + 1
+        self.neuron_output = self.neuron_bandwidth + 2*self.position_dims + 2
         self.speed_factor = neuron_args["speed_factor"]
         self.exp_decay_scale = neuron_args["exp_decay_scale"]
         self.max_connection_change = neuron_args["max_connection_change"]
@@ -50,6 +50,9 @@ class neuronWrapper(object):
         self.num_hidden_neurons_per_agent = neuron_args["num_hidden_neurons_per_agent"]
         self.reset_env_factor = neuron_args["reset_env_factor"]
         self.reset_env_factor_count = 0
+        self.noise_scale = neuron_args["noise_scale"]
+        self.max_velocity = neuron_args["max_velocity"]
+        self.brain_size = neuron_args["brain_size"]
 
         self.enviroment_observation_space = self._env.observation_space
         self.enviroment_action_space = self._env.action_space
@@ -123,7 +126,7 @@ class neuronWrapper(object):
         obs, _, other = self._env.reset()
 
         self._global_positions = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.position_dims))
-        self._global_connections = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))
+        self._global_connections = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))*self.noise_scale
 
         inital_state = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input))
 
@@ -149,6 +152,11 @@ class neuronWrapper(object):
         neron_signal = neron_actions[...,:self.neuron_bandwidth]
         neron_connect_positions = neron_actions[...,self.neuron_bandwidth:self.neuron_bandwidth+self.position_dims]
         neron_weight_scale = neron_actions[...,self.neuron_bandwidth+self.position_dims:self.neuron_bandwidth+self.position_dims+1]
+        neron_velocity_direction = neron_actions[...,self.neuron_bandwidth+self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+1]
+        neron_velocity_scale = neron_actions[...,self.neuron_bandwidth+2*self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+2]
+
+        neron_velocity_direction = neron_velocity_direction/np.linalg.norm(neron_velocity_direction, axis=-1, keepdims=True)
+        neron_velocity = neron_velocity_direction*neron_velocity_scale*  self.max_velocity
 
         neuron_weight_scale = np.repeat(neron_weight_scale, self.total_neurons_per_agent, axis=3)
 
@@ -163,6 +171,10 @@ class neuronWrapper(object):
         pairwise_weights = self._remap_distances(pairwise_distances)
 
         weights_delta = pairwise_weights * neuron_weight_scale * self.max_connection_change
+
+        self._global_positions += neron_velocity
+
+        self._global_positions = np.clip(self._global_positions, -self.brain_size, self.brain_size)
 
         self._global_connections += weights_delta
 
@@ -216,9 +228,68 @@ class neuronWrapper(object):
     def state(self) -> np.ndarray:
         pass
 
-    def render(self, *args, **kwargs) -> Any:
-        #TODO visulize the neurons
-        pass
+    def render(self, mode='human'):
+        """
+        Visualizes the neurons, their positions, and connections in a 2D grid.
+        """
+
+        import matplotlib.pyplot as plt
+        from matplotlib.collections import LineCollection
+
+        # Prepare the data for visualization
+        positions = self._global_positions[0]  # Using the first environment in the batch
+        connections = self._global_connections[0]  # Using the first environment in the batch
+
+        # Create a 2D scatter plot for neuron positions
+        fig, ax = plt.subplots(figsize=(8, 8))
+        for agent_idx, agent_positions in enumerate(positions):
+            # Extract neuron positions for this agent
+            neuron_positions = agent_positions[:, :2]  # Assuming 2D positions
+
+            # Plot neuron positions
+            ax.scatter(
+                neuron_positions[:, 0],
+                neuron_positions[:, 1],
+                label=f"Agent {agent_idx + 1}",
+                alpha=0.7,
+            )
+
+            # Create lines to represent connections
+            line_segments = []
+            for i, start_pos in enumerate(neuron_positions):
+                for j, weight in enumerate(connections[agent_idx, i]):
+                    if weight > 0.1:  # Visualize only significant connections
+                        end_pos = neuron_positions[j]
+                        line_segments.append([start_pos, end_pos])
+
+            # Add the connection lines to the plot
+            lc = LineCollection(
+                line_segments,
+                linewidths=0.5,
+                alpha=0.3,
+                colors="gray",
+            )
+            ax.add_collection(lc)
+
+        ax.set_title("Neuron Network Visualization")
+        ax.set_xlabel("X Position")
+        ax.set_ylabel("Y Position")
+        ax.legend()
+        ax.grid(True)
+        ax.set_xlim(-self.brain_size, self.brain_size)
+        ax.set_ylim(-self.brain_size, self.brain_size)
+
+        if mode == "human":
+            plt.show()
+        elif mode == "rgb_array":
+            # Return an RGB array for rendering
+            fig.canvas.draw()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            plt.close(fig)
+            return image
+        else:
+            raise NotImplementedError(f"Render mode {mode} is not supported.")
 
     def close(self) -> None:
         self._env.close()
