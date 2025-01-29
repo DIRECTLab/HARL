@@ -11,12 +11,12 @@ from abc import ABC, abstractmethod
 import copy
 from typing import Any, Mapping, Sequence, Tuple, Union
 
-#TODO get neuron states to update
-#TODO multiagent cases
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+
 #TODO create single agent test env
 #TODO single agent case
 
-#TODO add in position and connection information
 
 class neuronWrapper(object):
     """
@@ -232,9 +232,6 @@ class neuronWrapper(object):
         """
         Visualizes the neurons, their positions, and connections in a 2D grid.
         """
-
-        import matplotlib.pyplot as plt
-        from matplotlib.collections import LineCollection
 
         # Prepare the data for visualization
         positions = self._global_positions[0]  # Using the first environment in the batch
