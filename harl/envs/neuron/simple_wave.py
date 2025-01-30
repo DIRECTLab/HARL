@@ -12,23 +12,25 @@ class SimpleWave:
 
         self.discrete = False
         self.t=0
-        self.dt = .1
+        self.time_resolution = .1
+        self.action_resolution = .001
         self.max_t = 10
         self.history = []
 
-    def _fx(self, x):
-        return np.sin(x)
+    def _fx(self, x,t):
+        return np.sin(x*t)
+        # return -(x-np.cos(t-x**2)-1)**2
 
     def step(self, actions):
         """
         return local_obs, global_state, rewards, dones, infos, available_actions
         """
 
-        self.t+=self.dt
+        self.t+=self.time_resolution
 
-        obs = [np.array([self._fx(actions[0][0]*self.t)])]
+        rew = [np.array([self._fx(actions[0][0],self.t)])]
 
-        rew = obs[0][0]
+        obs = rew[0][0]
 
         self.history.append(actions[0][0])
 
@@ -43,7 +45,7 @@ class SimpleWave:
 
     def reset(self):
         """Returns initial observations and states"""
-        obs = [np.array([self._fx(0)])]
+        obs = [np.array([self._fx(0,0)])]
 
         self.t=0
 
@@ -57,15 +59,15 @@ class SimpleWave:
     def render(self):
         # plot heatmap of _fx with history
         
-        t = np.arange(0,self.max_t,self.dt)
+        t = np.arange(0,self.max_t,self.time_resolution)
         max_a = self.action_space[0].high[0]
-        a = np.arange(0,max_a,.001)
+        a = np.arange(0,max_a,self.action_resolution)
 
         heatmap = np.zeros((len(a),len(t)))
 
         for i in range(len(t)):
             for j in range(len(a)):
-                heatmap[j,i] = self._fx(a[j]*t[i])
+                heatmap[j,i] = self._fx(a[j],t[i])
 
 
         cmap = colors.LinearSegmentedColormap.from_list(
@@ -76,19 +78,31 @@ class SimpleWave:
 
         norm = colors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
 
-        max_positions = heatmap.argmax(axis=0)
+        max_positions = [
+            (i*self.time_resolution, j*self.action_resolution)
+            for i in range(heatmap.shape[1])
+            for j in np.where(heatmap[:,i].max()-heatmap[:,i] <= self.action_resolution)[0]
+        ]
 
-        
         plt.xlabel("Time")
         plt.ylabel("Action")
-        plt.imshow(heatmap,cmap=cmap,norm=norm,extent=[0,self.max_t,0,max_a])
+        plt.imshow(heatmap,cmap=cmap,norm=norm,extent=[0,self.max_t,0,max_a], origin='lower')
         plt.colorbar()
+        rows, cols = zip(*max_positions)
+        plt.scatter(rows,cols,marker='o',color='blue',s=3,alpha=.05)
         plt.title("Simple Wave")
-        plt.plot(np.arange(0,self.t,self.dt),np.array(self.history),color='blue')
+        plt.plot(np.arange(0,self.t,self.time_resolution),np.array(self.history),color='orange')
         plt.show()
 
     def close(self):
         return None
 
     def seed(self, seed):
-        raise NotImplementedError
+        return None
+    
+# #test render
+# env = SimpleWave({})
+# env.reset()
+# for i in range(100):
+#     env.step(np.array([[np.cos(i/50)**2]]))
+# env.render()
