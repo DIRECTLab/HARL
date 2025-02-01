@@ -1,10 +1,12 @@
-neuron_bandwidth: 3
-num_hidden_neurons_per_agent: 10
+neuron_bandwidth: 1
+num_hidden_neurons_per_agent: 3
 position_dims: 2
 speed_factor: 2
-exp_decay_scale: .5
-max_connection_change: .01
+exp_decay_scale: .1
+max_connection_change: .1
 max_velocity: 0.25
 brain_size: 1
 reset_env_factor: 3 
-noise_scale: 0.1
+noise_scale: 1
+movment_penalty: 0.1
+

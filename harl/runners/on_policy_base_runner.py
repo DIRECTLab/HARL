@@ -167,9 +167,10 @@ class OnPolicyBaseRunner:
         if self.algo_args["render"]["use_render"] is True:
             self.render()
             return
+            
         print("start running")
         self.warmup()
-
+        print("warmup done")
         episodes = (
             int(self.algo_args["train"]["num_env_steps"])
             // self.algo_args["train"]["episode_length"]
@@ -177,7 +178,6 @@ class OnPolicyBaseRunner:
         )
 
         self.logger.init(episodes)  # logger callback at the beginning of training
-
         for episode in range(1, episodes + 1):
             if self.algo_args["train"][
                 "use_linear_lr_decay"
@@ -265,6 +265,7 @@ class OnPolicyBaseRunner:
         # reset env
         obs, share_obs, available_actions = self.env.reset()
         # replay buffer
+        print("warmup")
         for agent_id in range(self.num_agents):
             self.actor_buffer[agent_id].obs[0] = obs[:, agent_id].copy()
             if self.actor_buffer[agent_id].available_actions is not None:

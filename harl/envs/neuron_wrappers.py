@@ -87,12 +87,12 @@ class neuronWrapper(object):
 
         batch = actions.shape[0]
         
-        out = np.zeros((batch, self.num_unwrapped_agents, size + (self.neuron_input-size%self.neuron_input)), dtype=actions.dtype)
+        out = np.zeros((batch, self.num_unwrapped_agents, self.num_visible_output_neurons*self.neuron_bandwidth), dtype=actions.dtype)
         
         for j in range(self.num_unwrapped_agents):
             out_slice = out[:, j : j+1, :]
             
-            out_slice_flat = out_slice.reshape(batch, self.num_visible_output_neurons, self.neuron_input)
+            out_slice_flat = out_slice.reshape(batch, self.num_visible_output_neurons, self.neuron_bandwidth)
 
             act_pos = j*self.total_neurons_per_agent+self.num_visible_input_neurons
 
@@ -111,7 +111,7 @@ class neuronWrapper(object):
         Converts the action from the enviroment to the actions for the neurons
         """
 
-        env_actions = actions[:,:,:self.neuron_input]
+        env_actions = actions[:,:,:self.neuron_bandwidth]
         neron_actions = actions[:,:,:self.neuron_output]
 
         env_actions = self._reshape_actions(np.array(env_actions))
@@ -125,24 +125,38 @@ class neuronWrapper(object):
 
         obs, _, other = self._env.reset()
 
-        self._global_positions = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.position_dims))
-        self._global_connections = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))*self.noise_scale
+        obs = np.array(obs)
+
+        if len(obs.shape) == 2:
+            obs = obs.reshape(1,obs.shape[0],obs.shape[1])
+
+        self._global_positions = (2*np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.position_dims))-1)
+        self._global_connections = (2*np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.total_neurons_per_agent))-1)*self.noise_scale
 
         inital_state = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input))
 
         self.out_obs = self._convert_observation(obs, inital_state)
         self.out_shared = self._convert_observation(obs, inital_state)
 
-        self.rewards = np.zeros((obs.shape[0],self.n_agents,1))
-        self.infos = [[{} for __ in range(self.num_unwrapped_agents)] for _ in range(obs.shape[0])]
-        self.available_actions = [None for _ in range(obs.shape[0])]
+        if self.out_obs.shape[0] == 1:
+            self.rewards = np.zeros((self.n_agents,1))
+            self.infos = [{} for _ in range(self.n_agents)]
+            self.available_actions = None
+            return self.out_obs[0], self.out_shared[0], other
+        else:
+            self.rewards = np.zeros((obs.shape[0],self.n_agents,1))
+            self.infos = [[{} for __ in range(self.n_agents)] for _ in range(obs.shape[0])]
+            self.available_actions = [None for _ in range(obs.shape[0])]
 
-        return self.out_obs, self.out_shared, other
+            return self.out_obs, self.out_shared, other
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any]:
         """
         Takes a step in the enviroment and neron states. The actions are the output of the neurons and they are converted for the enviroment.
         """
+
+        if len(actions.shape) == 2:
+            actions = actions.reshape(1,actions.shape[0],actions.shape[1])
 
         env_actions, neron_actions = self._convert_actions(actions)
 
@@ -168,7 +182,7 @@ class neuronWrapper(object):
 
         pairwise_distances = self._pairwise_distances(neron_connect_positions,self._global_positions)
 
-        pairwise_weights = self._remap_distances(pairwise_distances)
+        pairwise_weights = self._remap_distances(pairwise_distances, scale=self.exp_decay_scale)
 
         weights_delta = pairwise_weights * neuron_weight_scale * self.max_connection_change
 
@@ -185,12 +199,20 @@ class neuronWrapper(object):
         if self.step_count == self.speed_factor:
             self.step_count = 0
 
-            obs, self.share_obs, rewards, dones, self.infos, self.available_actions = self._env.step(env_actions)
+            if env_actions.shape[0] == 1:
+                env_actions = env_actions[0]
 
-            self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=1)
+            obs, self.share_obs, rewards, dones, _, self.available_actions = self._env.step(env_actions)
+
+            obs = np.array(obs)
+            rewards = np.array(rewards)
+            dones = np.array(dones)
+
+            self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=-2)
 
             if dones.any():
                 obs, _, other = self._env.reset()
+                obs = np.array(obs)
                 self.reset_env_factor_count += 1
 
                 if self.reset_env_factor_count == self.reset_env_factor:
@@ -201,8 +223,14 @@ class neuronWrapper(object):
             else:
                 dones = np.zeros_like(self.rewards).squeeze(axis=-1)
 
+            if len(obs.shape) == 2:
+                obs = obs.reshape(1,obs.shape[0],obs.shape[1])
+
             self.out_obs = self._convert_observation(obs,new_neuron_input)
             self.out_shared = self._convert_observation(obs,new_neuron_input)
+
+            if self.out_obs.shape[0] == 1:
+                return self.out_obs[0], self.out_shared[0], self.rewards, dones, self.infos, self.available_actions
 
             return self.out_obs, self.out_shared, self.rewards, dones, self.infos, self.available_actions
         
@@ -211,8 +239,10 @@ class neuronWrapper(object):
             out_obs = new_neuron_input.reshape(new_neuron_input.shape[0], self.n_agents, self.neuron_input)
             out_obs_shared = new_neuron_input.reshape(new_neuron_input.shape[0], self.n_agents, self.neuron_input)
 
+            if out_obs.shape[0] == 1:
+                return out_obs[0], out_obs_shared[0], np.zeros_like(self.rewards), np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
+
             return out_obs, out_obs_shared, np.zeros_like(self.rewards), np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
-        
     
     def _pairwise_distances(self, array1, array2):
 
@@ -220,73 +250,135 @@ class neuronWrapper(object):
         distances = np.sqrt(np.sum(diff ** 2, axis=-1))
         return distances
 
-    def _remap_distances(self, distances, scale=1.0):
+    def _remap_distances(self, distances, scale=.1):
 
-        remapped = np.exp(-distances / scale)
+        remapped = np.exp(-distances / (scale*self.brain_size*2))
         return remapped
 
     def state(self) -> np.ndarray:
         pass
 
     def render(self, mode='human'):
-        """
-        Visualizes the neurons, their positions, and connections in a 2D grid.
-        """
-
-        # Prepare the data for visualization
-        positions = self._global_positions[0]  # Using the first environment in the batch
-        connections = self._global_connections[0]  # Using the first environment in the batch
-
-        # Create a 2D scatter plot for neuron positions
-        fig, ax = plt.subplots(figsize=(8, 8))
-        for agent_idx, agent_positions in enumerate(positions):
-            # Extract neuron positions for this agent
-            neuron_positions = agent_positions[:, :2]  # Assuming 2D positions
-
-            # Plot neuron positions
-            ax.scatter(
-                neuron_positions[:, 0],
-                neuron_positions[:, 1],
-                label=f"Agent {agent_idx + 1}",
-                alpha=0.7,
+        if not hasattr(self, "_fig") or self._fig is None:
+            # Create one row of subplots, one column per agent
+            self._fig, self._axes = plt.subplots(
+                1,
+                self.num_unwrapped_agents,
+                figsize=(6 * self.num_unwrapped_agents, 6),  # Adjust size if you like
             )
 
-            # Create lines to represent connections
-            line_segments = []
-            for i, start_pos in enumerate(neuron_positions):
-                for j, weight in enumerate(connections[agent_idx, i]):
-                    if weight > 0.1:  # Visualize only significant connections
-                        end_pos = neuron_positions[j]
-                        line_segments.append([start_pos, end_pos])
+            self._colors = plt.cm.get_cmap("tab10", self.num_unwrapped_agents)
+            # If there's only one agent, self._axes is not an iterable array by default
+            if self.num_unwrapped_agents == 1:
+                self._axes = [self._axes]
 
-            # Add the connection lines to the plot
+            # Turn interactive mode on so that we can update the figure without blocking
+            plt.ion()
+
+        # Clear axes from any previous drawing
+        for ax in self._axes:
+            ax.clear()
+
+        # -------------------------------------------------------------------------
+        # 2) PREPARE NEURON DATA
+        #    We show data from the first environment in the batch (index=0).
+        # -------------------------------------------------------------------------
+        positions = self._global_positions[0]     # Shape: [num_agents, total_neurons_per_agent, 2 or 3...]
+        connections = self._global_connections[0] # Shape: [num_agents, total_neurons_per_agent, total_neurons_per_agent]
+
+        # -------------------------------------------------------------------------
+        # 3) PLOT EACH AGENT IN ITS OWN SUBPLOT
+        # -------------------------------------------------------------------------
+        for agent_idx in range(self.num_unwrapped_agents):
+            ax = self._axes[agent_idx]
+            # Extract 2D (x, y) positions of this agent's neurons
+            neuron_positions = positions[agent_idx, :, :2]  # shape: [num_neurons, 2]
+            agent_connections = connections[agent_idx]      # shape: [num_neurons, num_neurons]
+
+            
+            # Scatter plot of hidden neuron positions
+            ax.scatter(
+                neuron_positions[self.num_visible_input_neurons+self.num_visible_output_neurons:, 0],
+                neuron_positions[self.num_visible_input_neurons+self.num_visible_output_neurons:, 1],
+                label="Hidden Neurons",
+                alpha=0.7,
+                color=self._colors(agent_idx),
+                marker="o",
+            )
+
+             # Scatter plot of input neuron positions
+            ax.scatter(
+                neuron_positions[:self.num_visible_input_neurons, 0],
+                neuron_positions[:self.num_visible_input_neurons, 1],
+                label="Input Neurons",
+                alpha=0.7,
+                color=self._colors(agent_idx),
+                marker="+",
+                s=100
+            )
+
+            # Scatter plot of output neuron positions
+            ax.scatter(
+                neuron_positions[self.num_visible_input_neurons:self.num_visible_input_neurons+self.num_visible_output_neurons, 0],
+                neuron_positions[self.num_visible_input_neurons:self.num_visible_input_neurons+self.num_visible_output_neurons, 1],
+                label="Output Neurons",
+                alpha=0.7,
+                color=self._colors(agent_idx),
+                marker="x",
+                s=80
+            )
+
+
+            # Create line segments for connections above a certain weight threshold
+            line_segments = []
+            colors = []
+            alpha = []
+            linewidth = []
+            weight_color_map = plt.cm.get_cmap("coolwarm")
+            for i, start_pos in enumerate(neuron_positions):
+                for j, weight in enumerate(agent_connections[i]):
+                    end_pos = neuron_positions[j]
+                    line_segments.append([start_pos, end_pos])
+                    alpha.append(np.clip(abs(weight)**2,0,1))
+                    linewidth.append((abs(weight)+.1)**2)
+                    colors.append(weight_color_map(weight))
+
+
+            # Add these connection segments to the subplot
             lc = LineCollection(
                 line_segments,
-                linewidths=0.5,
-                alpha=0.3,
-                colors="gray",
+                linewidths=linewidth,
+                alpha=alpha,
+                color=colors,
             )
             ax.add_collection(lc)
 
-        ax.set_title("Neuron Network Visualization")
-        ax.set_xlabel("X Position")
-        ax.set_ylabel("Y Position")
-        ax.legend()
-        ax.grid(True)
-        ax.set_xlim(-self.brain_size, self.brain_size)
-        ax.set_ylim(-self.brain_size, self.brain_size)
+            # Set subplot titles, labels, limits
+            ax.set_title(f"Neuron Network (Agent {agent_idx+1})")
+            ax.set_xlabel("X Position")
+            ax.set_ylabel("Y Position")
+            ax.grid(True)
+            ax.set_xlim(-self.brain_size, self.brain_size)
+            ax.set_ylim(-self.brain_size, self.brain_size)
+            ax.legend()
 
+        # -------------------------------------------------------------------------
+        # 4) RENDER MODE LOGIC
+        # -------------------------------------------------------------------------
         if mode == "human":
-            plt.show()
+            # Draw/update the figure without blocking
+            self._fig.canvas.draw()
+            self._fig.canvas.flush_events()
+            plt.pause(0.001)  # A tiny pause so the figure updates
         elif mode == "rgb_array":
             # Return an RGB array for rendering
-            fig.canvas.draw()
-            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            plt.close(fig)
+            self._fig.canvas.draw()
+            width, height = self._fig.canvas.get_width_height()
+            image = np.frombuffer(self._fig.canvas.tostring_rgb(), dtype=np.uint8)
+            image = image.reshape((height, width, 3))
             return image
         else:
-            raise NotImplementedError(f"Render mode {mode} is not supported.")
+            raise NotImplementedError(f"Render mode '{mode}' is not supported.")
 
     def close(self) -> None:
         self._env.close()
