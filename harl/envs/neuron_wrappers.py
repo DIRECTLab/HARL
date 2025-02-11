@@ -14,8 +14,7 @@ from typing import Any, Mapping, Sequence, Tuple, Union
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-#TODO create single agent test env
-#TODO single agent case
+#TODO Each agent gets own critic
 
 
 class neuronWrapper(object):
@@ -53,6 +52,8 @@ class neuronWrapper(object):
         self.noise_scale = neuron_args["noise_scale"]
         self.max_velocity = neuron_args["max_velocity"]
         self.brain_size = neuron_args["brain_size"]
+        self.movment_change_penalty = neuron_args["movment_change_penalty"] if "movment_change_penalty" in neuron_args else 0
+        self.connection_change_penalty = neuron_args["connection_change_penalty"] if "connection_change_penalty" in neuron_args else 0
 
         self.enviroment_observation_space = self._env.observation_space
         self.enviroment_action_space = self._env.action_space
@@ -170,7 +171,9 @@ class neuronWrapper(object):
         neron_velocity_scale = neron_actions[...,self.neuron_bandwidth+2*self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+2]
 
         neron_velocity_direction = neron_velocity_direction/np.linalg.norm(neron_velocity_direction, axis=-1, keepdims=True)
-        neron_velocity = neron_velocity_direction*neron_velocity_scale*  self.max_velocity
+        neron_velocity = neron_velocity_direction*neron_velocity_scale * self.max_velocity
+
+        neron_velocity_penalty = np.linalg.norm(neron_velocity, axis=-1, keepdims=True) / self.max_velocity * self.movment_change_penalty
 
         neuron_weight_scale = np.repeat(neron_weight_scale, self.total_neurons_per_agent, axis=3)
 
@@ -186,6 +189,8 @@ class neuronWrapper(object):
 
         weights_delta = pairwise_weights * neuron_weight_scale * self.max_connection_change
 
+        weights_delta_penalty = np.abs(np.mean(weights_delta,-1)) / self.max_connection_change * self.connection_change_penalty
+
         self._global_positions += neron_velocity
 
         self._global_positions = np.clip(self._global_positions, -self.brain_size, self.brain_size)
@@ -195,6 +200,8 @@ class neuronWrapper(object):
         new_neuron_input = np.concatenate((new_neuron_signals, self._global_positions), axis=-1)
 
         self.step_count += 1
+
+        rewards_modifier = np.zeros_like(self.rewards)#self.rewards*neron_velocity_penalty.reshape(self.rewards.shape) + self.rewards*weights_delta_penalty.reshape(self.rewards.shape)
 
         if self.step_count == self.speed_factor:
             self.step_count = 0
@@ -209,6 +216,8 @@ class neuronWrapper(object):
             dones = np.array(dones)
 
             self.rewards = np.repeat(rewards, repeats=self.total_neurons_per_agent, axis=-2)
+
+            self.rewards -= rewards_modifier
 
             if dones.any():
                 obs, _, other = self._env.reset()
@@ -242,7 +251,7 @@ class neuronWrapper(object):
             if out_obs.shape[0] == 1:
                 return out_obs[0], out_obs_shared[0], np.zeros_like(self.rewards), np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
 
-            return out_obs, out_obs_shared, np.zeros_like(self.rewards), np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
+            return out_obs, out_obs_shared, -rewards_modifier, np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions
     
     def _pairwise_distances(self, array1, array2):
 
@@ -259,6 +268,7 @@ class neuronWrapper(object):
         pass
 
     def render(self, mode='human'):
+        self._env.render()
         if not hasattr(self, "_fig") or self._fig is None:
             # Create one row of subplots, one column per agent
             self._fig, self._axes = plt.subplots(
@@ -426,6 +436,5 @@ class neuronWrapper(object):
     @property
     def share_observation_space(self) -> Mapping[int, gym.Space]:
         return self._shared_observation_space
-
 
 

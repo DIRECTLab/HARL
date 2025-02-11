@@ -1,5 +1,5 @@
 import copy
-import gym
+import gymnasium as gym
 
 
 class GYMEnv:
@@ -20,20 +20,20 @@ class GYMEnv:
         return local_obs, global_state, rewards, dones, infos, available_actions
         """
         if self.discrete:
-            obs, rew, done, info = self.env.step(actions.flatten()[0])
+            obs, rew, done, trunc, info = self.env.step(actions.flatten()[0])
         else:
-            obs, rew, done, info = self.env.step(actions[0])
+            obs, rew, done, trunc, info = self.env.step(actions[0])
         if done:
             if (
                 "TimeLimit.truncated" in info.keys()
                 and info["TimeLimit.truncated"] == True
             ):
                 info["bad_transition"] = True
-        return [obs], [obs], [[rew]], [done], [info], self.get_avail_actions()
+        return [obs], [obs], [[rew]], [done or trunc], [info], self.get_avail_actions()
 
     def reset(self):
         """Returns initial observations and states"""
-        obs = [self.env.reset()]
+        obs = [self.env.reset()[0]]
         s_obs = copy.deepcopy(obs)
         return obs, s_obs, self.get_avail_actions()
 
@@ -51,4 +51,8 @@ class GYMEnv:
         self.env.close()
 
     def seed(self, seed):
-        self.env.seed(seed)
+        #check to see if the environment has a seed method
+        if hasattr(self.env, 'seed'):
+            self.env.seed(seed)
+        else:
+            self.env.reset(seed=seed)

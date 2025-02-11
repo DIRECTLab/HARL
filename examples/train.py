@@ -156,8 +156,8 @@ def main():
         import isaacgym  # isaacgym has to be imported before PyTorch
 
     # note: isaac gym does not support multiple instances, thus cannot eval separately
+    algo_args["eval"]["use_eval"] = False
     if args["env"] == "dexhands":
-        algo_args["eval"]["use_eval"] = False
         algo_args["train"]["episode_length"] = env_args["hands_episode_length"]
 
     if args["use_neuron"] and args["load_config"] == "":

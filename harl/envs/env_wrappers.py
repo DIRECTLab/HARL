@@ -369,6 +369,51 @@ class ShareDummyVecEnv(ShareVecEnv):
         else:
             raise NotImplementedError
 
+class SingleAgentIsaacLabWrapper(object):
+    def __init__(self, env: Any) -> None:
+        self._env = env
+
+    def __getattr__(self, key: str) -> Any:
+        if hasattr(self._env, key):
+            return getattr(self._env, key)
+        raise AttributeError(f"Wrapped environment ({self._env.__class__.__name__}) does not have attribute '{key}'")
+    
+    def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
+
+        _obs, reward, terminated, truncated, info = self._env.step(actions[self.agents[0]])
+
+        _obs = {self.agents[0]:_obs['policy']}
+        reward = {self.agents[0]:reward}
+        terminated = {self.agents[0]:terminated}
+        truncated = {self.agents[0]:truncated}
+        info = {self.agents[0]:info}
+
+        return _obs, reward, terminated, truncated, info
+
+    def state(self) -> Any:
+        return None
+
+    @property
+    def num_agents(self) -> int:
+        return 1
+    
+    @property
+    def agents(self) -> Sequence[str]:
+        return ["single_agent"]
+    
+    @property
+    def share_observation_space(self) -> Sequence[gym.Space]:
+        return [self._env.single_observation_space['policy']]
+    
+    @property
+    def observation_space(self) -> Sequence[gym.Space]:
+        return [self._env.single_observation_space['policy']]
+    
+    @property
+    def action_space(self) -> Sequence[gym.Space]:
+        return [self._env.single_action_space]
+        
+
 class IsaacLabWrapper(object):
     def __init__(self, env: Any) -> None:
         """Base wrapper class for multi-agent environments
@@ -376,18 +421,22 @@ class IsaacLabWrapper(object):
         :param env: The multi-agent environment to wrap
         :type env: Any supported multi-agent environment
         """
-        self._env = env
-        try:
-            self._unwrapped = self._env.unwrapped
-        except:
-            self._unwrapped = env
+        if not hasattr(env, "agents"):
+            self._env = SingleAgentIsaacLabWrapper(env)
+            self.unwrapped = self._env
+        else:
+            self._env = env
+            try:
+                self.unwrapped = self._env.unwrapped
+            except:
+                self.unwrapped = env
 
-        self._agent_map = {agent: i for i, agent in enumerate(self._unwrapped.agents)}
-        self._agent_map_inv = {i: agent for i, agent in enumerate(self._unwrapped.agents)}
+        self._agent_map = {agent: i for i, agent in enumerate(self.unwrapped.agents)}
+        self._agent_map_inv = {i: agent for i, agent in enumerate(self.unwrapped.agents)}
 
         # device
-        if hasattr(self._unwrapped, "device"):
-            self._device = torch.device(self._unwrapped.device)
+        if hasattr(self.unwrapped, "device"):
+            self._device = torch.device(self.unwrapped.device)
         else:
             self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -404,9 +453,9 @@ class IsaacLabWrapper(object):
         """
         if hasattr(self._env, key):
             return getattr(self._env, key)
-        if hasattr(self._unwrapped, key):
-            return getattr(self._unwrapped, key)
-        raise AttributeError(f"Wrapped environment ({self._unwrapped.__class__.__name__}) does not have attribute '{key}'")
+        if hasattr(self.unwrapped, key):
+            return getattr(self.unwrapped, key)
+        raise AttributeError(f"Wrapped environment ({self.unwrapped.__class__.__name__}) does not have attribute '{key}'")
 
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         _obs, _ = self._env.reset()
@@ -415,7 +464,7 @@ class IsaacLabWrapper(object):
         _obs = [o for o in _obs.values()]
         obs = torch.stack(_obs, axis=1)
 
-        s_obs = [self._unwrapped.state() for _ in range(self._unwrapped.num_agents)]
+        s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
         if s_obs[0] != None:
             s_obs = torch.stack(s_obs, axis=1)
         else:
@@ -435,22 +484,24 @@ class IsaacLabWrapper(object):
         :rtype: tuple of dictionaries of torch.Tensor and any other info
         """
 
-        actions = {self._agent_map_inv[i]:actions[i] for i in range(self._unwrapped.num_agents)}
+        actions = {self._agent_map_inv[i]:actions[i] for i in range(self.unwrapped.num_agents)}
 
         _obs, reward, terminated, truncated, info = self._env.step(actions)
 
-        obs = torch.stack([_obs[agent] for agent in self._unwrapped.agents], axis=1)
-        s_obs = [self._unwrapped.state() for _ in range(self._unwrapped.num_agents)]
+        obs = torch.stack([_obs[agent] for agent in self.unwrapped.agents], axis=1)
+        s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
         if s_obs[0] != None:
             s_obs = torch.stack(s_obs, axis=1)
         else:
-            s_obs = torch.stack([_obs[agent] for agent in self._unwrapped.agents], axis=1)
-        reward = torch.stack([reward[agent] for agent in self._unwrapped.agents], axis=1)
+            s_obs = torch.stack([_obs[agent] for agent in self.unwrapped.agents], axis=1)
+        reward = torch.stack([reward[agent] for agent in self.unwrapped.agents], axis=1)
         reward = reward.unsqueeze(-1)
-        terminated = torch.stack([terminated[agent] for agent in self._unwrapped.agents], axis=1)
-        # truncated = torch.stack([truncated[agent] for agent in self._unwrapped.agents], axis=1)
+        terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
+        truncated = torch.stack([truncated[agent] for agent in self._unwrapped.agents], axis=1)
 
-        return obs, s_obs, reward, terminated, None, None
+        dones = np.logical_or(terminated, truncated)
+
+        return obs, s_obs, reward, dones, None, None
 
     def state(self) -> torch.Tensor:
         """Get the environment state
@@ -494,7 +545,7 @@ class IsaacLabWrapper(object):
 
         If the wrapped environment does not have the ``num_envs`` property, it will be set to 1
         """
-        return self._unwrapped.num_envs if hasattr(self._unwrapped, "num_envs") else 1
+        return self.unwrapped.num_envs if hasattr(self.unwrapped, "num_envs") else 1
 
     @property
     def num_agents(self) -> int:
@@ -503,7 +554,7 @@ class IsaacLabWrapper(object):
         Read from the length of the ``agents`` property if the wrapped environment doesn't define it
         """
         try:
-            return self._unwrapped.num_agents
+            return self.unwrapped.num_agents
         except:
             return len(self.agents)
 
@@ -514,7 +565,7 @@ class IsaacLabWrapper(object):
         Read from the length of the ``possible_agents`` property if the wrapped environment doesn't define it
         """
         try:
-            return self._unwrapped.max_num_agents
+            return self.unwrapped.max_num_agents
         except:
             return len(self.possible_agents)
 
@@ -524,7 +575,7 @@ class IsaacLabWrapper(object):
 
         These may be changed as an environment progresses (i.e. agents can be added or removed)
         """
-        return self._unwrapped.agents
+        return self.unwrapped.agents
 
     @property
     def possible_agents(self) -> Sequence[str]:
@@ -532,7 +583,7 @@ class IsaacLabWrapper(object):
 
         These can not be changed as an environment progresses
         """
-        return self._unwrapped.possible_agents
+        return self.unwrapped.possible_agents
 
     # @property
     # def state_spaces(self) -> Mapping[str, gym.Space]:
@@ -549,22 +600,22 @@ class IsaacLabWrapper(object):
     def observation_space(self) -> Mapping[int, gym.Space]:
         """Observation spaces
         """
-        return {self._agent_map[k]: v for k, v in self._unwrapped.observation_spaces.items()}
+        return {self._agent_map[k]: v for k, v in self.unwrapped.observation_spaces.items()}
 
     @property
     def action_space(self) -> Mapping[int, gym.Space]:
         """Action spaces
         """
-        return {self._agent_map[k]: v for k, v in self._unwrapped.action_spaces.items()}
+        return {self._agent_map[k]: v for k, v in self.unwrapped.action_spaces.items()}
     
     @property
     def share_observation_space(self) -> Mapping[int, gym.Space]:
         """Share observation space
         """
-        if self._unwrapped.state_space.shape[0] == 0:
-            return {self._agent_map[k]: self._unwrapped.observation_spaces[k] for k in self._unwrapped.agents}
+        if self.unwrapped.state_space.shape[0] == 0:
+            return {self._agent_map[k]: self.unwrapped.observation_spaces[k] for k in self.unwrapped.agents}
         else:
-            return {self._agent_map[k]: self._unwrapped.state_space for k in self._unwrapped.agents}
+            return {self._agent_map[k]: self.unwrapped.state_space for k in self.unwrapped.agents}
     
 
 class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
