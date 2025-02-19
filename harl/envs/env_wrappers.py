@@ -497,9 +497,9 @@ class IsaacLabWrapper(object):
         reward = torch.stack([reward[agent] for agent in self.unwrapped.agents], axis=1)
         reward = reward.unsqueeze(-1)
         terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
-        truncated = torch.stack([truncated[agent] for agent in self._unwrapped.agents], axis=1)
+        truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
 
-        dones = np.logical_or(terminated, truncated)
+        dones = torch.logical_or(terminated, truncated)
 
         return obs, s_obs, reward, dones, None, None
 

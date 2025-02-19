@@ -24,7 +24,7 @@ def get_shape_from_obs_space(obs_space):
     elif obs_space.__class__.__name__ == "list":
         obs_shape = obs_space
     else:
-        raise NotImplementedError
+        return (obs_space,)
     return obs_shape
 
 
