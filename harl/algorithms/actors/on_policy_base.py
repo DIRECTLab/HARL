@@ -31,8 +31,8 @@ class OnPolicyBase:
         # save observation and action spaces
         self.obs_space = obs_space
         self.act_space = act_space
+        self.obs_space_size = self.obs_space.shape[0]
         # create actor network
-        # TODO needs a way to switch to neuron policy somehow, or maybe we don't need the activation function and can run the default instead
         self.actor = StochasticPolicy(args, self.obs_space, self.act_space, self.device)
         # create actor optimizer
         self.actor_optimizer = torch.optim.Adam(
@@ -63,7 +63,7 @@ class OnPolicyBase:
             deterministic: (bool) whether the action should be mode of distribution or should be sampled.
         """
         actions, action_log_probs, rnn_states_actor = self.actor(
-            obs, rnn_states_actor, masks, available_actions, deterministic
+            obs[:,:self.obs_space_size], rnn_states_actor, masks, available_actions, deterministic
         )
         return actions, action_log_probs, rnn_states_actor
 

@@ -4,6 +4,8 @@ from harl.common.base_logger import BaseLogger
 
 
 class IsaacLabLogger(BaseLogger):
+    aver_episode_rewards = None
+
     def get_task_name(self):
         return self.env_args["task"]
 
@@ -41,19 +43,19 @@ class IsaacLabLogger(BaseLogger):
         )
 
         if len(self.done_episodes_rewards) > 0:
-            aver_episode_rewards = np.mean(self.done_episodes_rewards)
+            self.aver_episode_rewards = np.mean(self.done_episodes_rewards)
             print(
                 "Some episodes done, average episode reward is {}.\n".format(
-                    aver_episode_rewards
+                    self.aver_episode_rewards
                 )
             )
             self.writter.add_scalars(
                 "train_episode_rewards",
-                {"aver_rewards": aver_episode_rewards},
+                {"aver_rewards": self.aver_episode_rewards},
                 self.total_num_steps,
             )
             self.log_file.write(
-                ",".join(map(str, [self.total_num_steps, aver_episode_rewards])) + "\n"
+                ",".join(map(str, [self.total_num_steps, self.aver_episode_rewards])) + "\n"
             )
             self.log_file.flush()
             self.done_episodes_rewards = []

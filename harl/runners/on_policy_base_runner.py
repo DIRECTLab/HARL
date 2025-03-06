@@ -15,6 +15,8 @@ from harl.utils.envs_tools import set_seed, get_num_agents, make_render_env, mak
 from harl.utils.configs_tools import init_dir, save_config, get_task_name
 from harl.utils.models_tools import init_device
 from harl.envs import LOGGER_REGISTRY
+import os
+from pathlib import Path
 
 
 class OnPolicyBaseRunner:
@@ -30,7 +32,7 @@ class OnPolicyBaseRunner:
         self.args = args
         self.algo_args = algo_args
         self.env_args = env_args
-
+        self.best_avg_reward = -np.inf
         self.hidden_sizes = algo_args["model"]["hidden_sizes"]
         self.rnn_hidden_size = self.hidden_sizes[-1]
         self.recurrent_n = algo_args["model"]["recurrent_n"]
@@ -54,7 +56,6 @@ class OnPolicyBaseRunner:
         setproctitle.setproctitle(
             str(args["algo"]) + "-" + str(args["env"]) + "-" + str(args["exp_name"])
         )
-
         # set the config of env
         if self.algo_args["render"]["use_render"]:  # make envs for rendering
             (
@@ -86,6 +87,16 @@ class OnPolicyBaseRunner:
         print("share_observation_space: ", self.env.share_observation_space)
         print("observation_space: ", self.env.observation_space)
         print("action_space: ", self.env.action_space)
+
+        self.is_heter_action_space = False
+        self.max_action_space = 0
+
+        first_act_space = self.env.action_space[0]
+        for key, val in self.env.action_space.items():
+            if val.shape[0] > self.max_action_space:
+                self.max_action_space =  val.shape[0] 
+            if val != first_act_space and not self.is_heter_action_space:
+                self.is_heter_action_space = True
 
         # actor
         if self.share_param:
@@ -241,7 +252,7 @@ class OnPolicyBaseRunner:
             self.prep_training()  # change to train mode
 
             actor_train_infos, critic_train_info = self.train()
-
+            
             # log information
             if episode % self.algo_args["train"]["log_interval"] == 0:
                 self.logger.episode_log(
@@ -252,11 +263,16 @@ class OnPolicyBaseRunner:
                 )
 
             # eval
+            if self.logger.aver_episode_rewards is not None:
+                if self.logger.aver_episode_rewards > self.best_avg_reward:
+                    self.best_avg_reward = self.logger.aver_episode_rewards
+                    self.save(Path(Path(self.save_dir).parent, 'best_model'))
+
             if episode % self.algo_args["train"]["eval_interval"] == 0:
                 if self.algo_args["eval"]["use_eval"]:
                     self.prep_rollout()
                     self.eval()
-                self.save()
+                self.save(self.save_dir)
 
             self.after_update()
 
@@ -267,11 +283,13 @@ class OnPolicyBaseRunner:
         # replay buffer
         print("warmup")
         for agent_id in range(self.num_agents):
-            self.actor_buffer[agent_id].obs[0] = obs[:, agent_id].copy()
+            obs_space = self.env.observation_space[agent_id].shape[0]
+            self.actor_buffer[agent_id].obs[0] = obs[:, agent_id, :obs_space].copy()
             if self.actor_buffer[agent_id].available_actions is not None:
                 self.actor_buffer[agent_id].available_actions[0] = available_actions[
                     :, agent_id
                 ].copy()
+
         if self.state_type == "EP":
             self.critic_buffer.share_obs[0] = share_obs[:, 0].copy()
         elif self.state_type == "FP":
@@ -302,7 +320,16 @@ class OnPolicyBaseRunner:
             action_log_prob_collector.append(_t2n(action_log_prob))
             rnn_state_collector.append(_t2n(rnn_state))
         # (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
+
+        if self.is_heter_action_space:
+            for i in range(len(action_collector)):
+                pad_diff = self.max_action_space - action_collector[i].shape[1]
+                if pad_diff > 0:
+                    action_collector[i] = np.pad(action_collector[i], [(0,0), (0,pad_diff)])
+                    action_log_prob_collector[i] = np.pad(action_log_prob_collector[i], [(0,0), (0,pad_diff)])
+        
         actions = np.array(action_collector).transpose(1, 0, 2)
+        # actions = np.array(action_collector).transpose(1, 0, 2)
         action_log_probs = np.array(action_log_prob_collector).transpose(1, 0, 2)
         rnn_states = np.array(rnn_state_collector).transpose(1, 0, 2, 3)
 
@@ -716,22 +743,25 @@ class OnPolicyBaseRunner:
             self.actor[agent_id].prep_training()
         self.critic.prep_training()
 
-    def save(self):
+    def save(self, directory):
         """Save model parameters."""
+        if not os.path.exists(directory):
+            os.mkdir(directory)
+
         for agent_id in range(self.num_agents):
             policy_actor = self.actor[agent_id].actor
             torch.save(
                 policy_actor.state_dict(),
-                str(self.save_dir) + "/actor_agent" + str(agent_id) + ".pt",
+                str(directory) + "/actor_agent" + str(agent_id) + ".pt",
             )
         policy_critic = self.critic.critic
         torch.save(
-            policy_critic.state_dict(), str(self.save_dir) + "/critic_agent" + ".pt"
+            policy_critic.state_dict(), str(directory) + "/critic_agent" + ".pt"
         )
         if self.value_normalizer is not None:
             torch.save(
                 self.value_normalizer.state_dict(),
-                str(self.save_dir) + "/value_normalizer" + ".pt",
+                str(directory) + "/value_normalizer" + ".pt",
             )
 
     def restore(self):
@@ -745,17 +775,18 @@ class OnPolicyBaseRunner:
             )
             self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
         if not self.algo_args["render"]["use_render"]:
-            policy_critic_state_dict = torch.load(
-                str(self.algo_args["train"]["model_dir"]) + "/critic_agent" + ".pt"
-            )
-            self.critic.critic.load_state_dict(policy_critic_state_dict)
-            if self.value_normalizer is not None:
-                value_normalizer_state_dict = torch.load(
-                    str(self.algo_args["train"]["model_dir"])
-                    + "/value_normalizer"
-                    + ".pt"
+            if os.path.exists(str(self.algo_args["train"]["model_dir"]) + "/critic_agent" + ".pt"):
+                policy_critic_state_dict = torch.load(
+                    str(self.algo_args["train"]["model_dir"]) + "/critic_agent" + ".pt"
                 )
-                self.value_normalizer.load_state_dict(value_normalizer_state_dict)
+                self.critic.critic.load_state_dict(policy_critic_state_dict)
+                if self.value_normalizer is not None:
+                    value_normalizer_state_dict = torch.load(
+                        str(self.algo_args["train"]["model_dir"])
+                        + "/value_normalizer"
+                        + ".pt"
+                    )
+                    self.value_normalizer.load_state_dict(value_normalizer_state_dict)
 
     def close(self):
         """Close environment, writter, and logger."""

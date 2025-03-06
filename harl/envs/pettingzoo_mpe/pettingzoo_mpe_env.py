@@ -34,8 +34,8 @@ class PettingZooMPEEnv:
         self.n_agents = self.env.num_agents
         self.agents = self.env.agents
         self.share_observation_space = self.repeat(self.env.state_space)
-        self.observation_space = [self.env.observation_space(agent) for agent in self.agents]
-        self.action_space = [self.env.action_space(agent) for agent in self.agents]
+        self.observation_space = self.unwrap(self.env.observation_spaces)
+        self.action_space = self.unwrap(self.env.action_spaces)
         self._seed = 0
 
     def step(self, actions):

@@ -9,8 +9,6 @@ from harl.envs.dexhands.dexhands_logger import DexHandsLogger
 from harl.envs.lag.lag_logger import LAGLogger
 from harl.envs.isaaclab.Isaac_lab_logger import IsaacLabLogger
 
-from harl.envs.neuron_wrappers import neuronWrapper
-
 FLAGS = flags.FLAGS
 FLAGS(["train_sc.py"])
 
@@ -24,8 +22,4 @@ LOGGER_REGISTRY = {
     "smacv2": SMACv2Logger,
     "lag": LAGLogger,
     "isaaclab": IsaacLabLogger,
-}
-
-neuron_REGISTRY = {
-    "base": neuronWrapper,
 }

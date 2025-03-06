@@ -1,6 +1,7 @@
 """
 Modified from OpenAI Baselines code to work with multi-agent envs
 """
+import gymnasium.spaces.box
 import numpy as np
 import torch
 import gym
@@ -299,6 +300,7 @@ class ShareSubprocVecEnv(ShareVecEnv):
         self.closed = True
 
 
+
 # single env
 class ShareDummyVecEnv(ShareVecEnv):
     def __init__(self, env_fns):
@@ -456,19 +458,40 @@ class IsaacLabWrapper(object):
         if hasattr(self.unwrapped, key):
             return getattr(self.unwrapped, key)
         raise AttributeError(f"Wrapped environment ({self.unwrapped.__class__.__name__}) does not have attribute '{key}'")
+    
+    def stack_padded_tensors_last_axis(self, tensors, padding_value=0):
+        # return torch.stack(tensors, axis=1)
+        """
+        Stacks a list of tensors with potentially different sizes by padding them to the maximum size.
 
+        Args:
+            tensors (list of torch.Tensor): List of tensors to stack.
+            padding_value (scalar, optional): Value to use for padding. Defaults to 0.
+
+        Returns:
+            torch.Tensor: Stacked tensor with padded dimensions.
+        """
+        max_size = max([tensor.shape[-1] for tensor in tensors])
+        padded_tensors = []
+        for tensor in tensors:
+            pad_diff = max_size - tensor.shape[-1]
+            padded_tensor = torch.nn.functional.pad(tensor, (0, pad_diff), 'constant', padding_value)
+            padded_tensors.append(padded_tensor)
+
+        return torch.stack(padded_tensors, -1).transpose(-1,-2)
+    
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         _obs, _ = self._env.reset()
 
         # turn obs into array with dims [batch, agent, *obs_shape]
         _obs = [o for o in _obs.values()]
-        obs = torch.stack(_obs, axis=1)
+        obs = self.stack_padded_tensors_last_axis(_obs, 0)
 
         s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
         if s_obs[0] != None:
-            s_obs = torch.stack(s_obs, axis=1)
+            s_obs = self.stack_padded_tensors_last_axis(s_obs, 0)
         else:
-            s_obs = torch.stack(_obs, axis=1)
+            s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for _ in self.unwrapped.agents])
         
         return obs, s_obs, None
 
@@ -488,12 +511,14 @@ class IsaacLabWrapper(object):
 
         _obs, reward, terminated, truncated, info = self._env.step(actions)
 
-        obs = torch.stack([_obs[agent] for agent in self.unwrapped.agents], axis=1)
+        obs = self.stack_padded_tensors_last_axis([_obs[agent] for agent in self.unwrapped.agents])
         s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
+        
         if s_obs[0] != None:
-            s_obs = torch.stack(s_obs, axis=1)
+            s_obs = self.stack_padded_tensors_last_axis(s_obs)
         else:
-            s_obs = torch.stack([_obs[agent] for agent in self.unwrapped.agents], axis=1)
+            s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for agent in self.unwrapped.agents])
+
         reward = torch.stack([reward[agent] for agent in self.unwrapped.agents], axis=1)
         reward = reward.unsqueeze(-1)
         terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
@@ -612,8 +637,19 @@ class IsaacLabWrapper(object):
     def share_observation_space(self) -> Mapping[int, gym.Space]:
         """Share observation space
         """
+        max_obs_key = None
+        max_shape = 0
+        for key, val in self.unwrapped.observation_spaces.items():
+            if val.shape[0] > max_shape:
+                max_shape = val.shape[0]
+                max_obs_key = key
+
+        shape = self.unwrapped.observation_spaces[max_obs_key].shape[0]*len(self.unwrapped.observation_spaces.items())
+        high = self.unwrapped.observation_spaces[max_obs_key].high[0]
+        low = self.unwrapped.observation_spaces[max_obs_key].low[0]
+
         if self.unwrapped.state_space.shape[0] == 0:
-            return {self._agent_map[k]: self.unwrapped.observation_spaces[k] for k in self.unwrapped.agents}
+            return {self._agent_map[k]: gymnasium.spaces.Box(low,high,(shape,)) for k in self.unwrapped.agents}
         else:
             return {self._agent_map[k]: self.unwrapped.state_space for k in self.unwrapped.agents}
     

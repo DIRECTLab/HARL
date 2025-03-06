@@ -90,10 +90,15 @@ class OnPolicyActorBuffer:
         available_actions=None,
     ):
         """Insert data into actor buffer."""
-        self.obs[self.step + 1] = obs.copy()
+        obs_space = self.obs.shape[-1]
+        self.obs[self.step + 1] = obs[:,:obs_space].copy()
+        
         self.rnn_states[self.step + 1] = rnn_states.copy()
-        self.actions[self.step] = actions.copy()
-        self.action_log_probs[self.step] = action_log_probs.copy()
+
+        act_space = self.actions.shape[-1]
+        self.actions[self.step] = actions[:,:act_space].copy()
+
+        self.action_log_probs[self.step] = action_log_probs[:,:act_space].copy()
         self.masks[self.step + 1] = masks.copy()
         if active_masks is not None:
             self.active_masks[self.step + 1] = active_masks.copy()

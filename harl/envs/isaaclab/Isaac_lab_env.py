@@ -23,6 +23,8 @@ class IsaacLabEnv:
             self.env = IsaacVideoWrapper(self.env, **video_kwargs)
 
         self.env = IsaacLabWrapper(self.env)
+
+        self.unwrapped = self.env.unwrapped
         
 
         self.env_args = env_args
@@ -33,7 +35,7 @@ class IsaacLabEnv:
         self.action_space = self.env.action_space
 
     def step(self, actions):
-        actions = torch.tensor(actions.transpose(1, 0, 2))
+        actions = torch.tensor(actions.transpose(1, 0, 2), dtype=torch.float32)
         obs_all, state_all, reward_all, done_all, info_all, _ = self.env.step(actions)
         return (
             _t2n(obs_all),
