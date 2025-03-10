@@ -156,7 +156,7 @@ def _make_train_env(env_name, seed, n_threads, env_args):
         return ShareSubprocVecEnv([get_env_fn(i) for i in range(n_threads)])
 
 
-def make_eval_env(env_name, seed, n_threads, env_args):
+def _make_eval_env(env_name, seed, n_threads, env_args):
     """Make env for evaluation."""
     if env_name == "dexhands" or env_name == "isaaclab":  # dexhands does not support running multiple instances
         raise NotImplementedError
@@ -209,7 +209,7 @@ def make_eval_env(env_name, seed, n_threads, env_args):
         return ShareSubprocVecEnv([get_env_fn(i) for i in range(n_threads)])
 
 
-def make_render_env(env_name, seed, env_args):
+def _make_render_env(env_name, seed, env_args):
     """Make env for rendering."""
     manual_render = True  # manually call the render() function
     manual_expand_dims = True  # manually expand the num_of_parallel_envs dimension

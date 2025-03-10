@@ -5,7 +5,7 @@ import gymnasium as gym
 class GYMEnv:
     def __init__(self, args):
         self.args = copy.deepcopy(args)
-        self.env = gym.make(args["scenario"])
+        self.env = gym.make(args["scenario"] )
         self.n_agents = 1
         self.share_observation_space = [self.env.observation_space]
         self.observation_space = [self.env.observation_space]

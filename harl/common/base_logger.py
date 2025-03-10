@@ -22,6 +22,7 @@ class BaseLogger:
         self.log_file = open(
             os.path.join(run_dir, "progress.txt"), "w", encoding="utf-8"
         )
+        self.aver_episode_rewards = None
 
     def get_task_name(self):
         """Get the task name."""
@@ -99,7 +100,8 @@ class BaseLogger:
         if len(self.done_episodes_rewards) > 0:
             aver_episode_rewards = np.mean(self.done_episodes_rewards)
             print(
-                "Some episodes done, average episode reward is {}.\n".format(
+                "Some episodes done ({}), average episode reward is {}.\n".format(
+                    len(self.done_episodes_rewards),
                     aver_episode_rewards
                 )
             )

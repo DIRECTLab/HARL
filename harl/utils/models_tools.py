@@ -21,6 +21,7 @@ def init_device(args):
     else:
         print("choose to use cpu...")
         device = torch.device("cpu")
+
     torch.set_num_threads(args["torch_threads"])
     return device
 

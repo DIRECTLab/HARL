@@ -34,7 +34,9 @@ class OnPolicyBaseRunner:
         self.env_args = env_args
         self.best_avg_reward = -np.inf
         self.hidden_sizes = algo_args["model"]["hidden_sizes"]
+        self.critic_hidden_sizes = algo_args["model"]["critic_hidden_sizes"]
         self.rnn_hidden_size = self.hidden_sizes[-1]
+        self.rnn_critic_hidden_size = self.critic_hidden_sizes[-1]
         self.recurrent_n = algo_args["model"]["recurrent_n"]
         self.action_aggregation = algo_args["algo"]["action_aggregation"]
         self.state_type = env_args.get("state_type", "EP")
@@ -393,7 +395,7 @@ class OnPolicyBaseRunner:
         # If env is done, then reset rnn_state_critic to all zero
         if self.state_type == "EP":
             rnn_states_critic[dones_env == True] = np.zeros(
-                ((dones_env == True).sum(), self.recurrent_n, self.rnn_hidden_size),
+                ((dones_env == True).sum(), self.recurrent_n, self.rnn_critic_hidden_size),
                 dtype=np.float32,
             )
         elif self.state_type == "FP":
@@ -402,7 +404,7 @@ class OnPolicyBaseRunner:
                     (dones_env == True).sum(),
                     self.num_agents,
                     self.recurrent_n,
-                    self.rnn_hidden_size,
+                    self.rnn_critic_hidden_size,
                 ),
                 dtype=np.float32,
             )

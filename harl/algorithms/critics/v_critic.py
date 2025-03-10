@@ -42,6 +42,8 @@ class VCritic:
 
         self.share_obs_space = cent_obs_space
 
+        args["hidden_sizes"] = args["critic_hidden_sizes"]
+
         self.critic = VNet(args, self.share_obs_space, self.device)
 
         self.critic_optimizer = torch.optim.Adam(

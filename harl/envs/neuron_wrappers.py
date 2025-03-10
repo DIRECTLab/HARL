@@ -61,9 +61,9 @@ class neuronWrapper(object):
         self.num_visible_input_neurons = self.enviroment_observation_space[0].shape[0]//self.neuron_bandwidth + (1 if self.enviroment_observation_space[0].shape[0]%self.neuron_bandwidth != 0 else 0)
         self.num_visible_output_neurons = self.enviroment_action_space[0].shape[0]//self.neuron_bandwidth + (1 if self.enviroment_action_space[0].shape[0]%self.neuron_bandwidth != 0 else 0)
 
-        self._observation_space = [spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_input,),dtype=np.float32) for _ in range(self.n_agents)]
-        self._action_space = [spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_output,),dtype=np.float32) for _ in range(self.n_agents)]
-        self._shared_observation_space = [spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_input,),dtype=np.float32) for _ in range(self.n_agents)]
+        self._observation_space = {i:spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_input,),dtype=np.float32) for i in range(self.n_agents)}
+        self._action_space = {i:spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_output,),dtype=np.float32) for i in range(self.n_agents)}
+        self._shared_observation_space = {i:spaces.Box(low=-1.0,high=1.0,shape=(self.neuron_input*self.n_agents,),dtype=np.float32) for i in range(self.n_agents)}
 
     def _reshape_obs(self, obs: np.ndarray, prev_state: np.ndarray) -> np.ndarray:
 
@@ -113,16 +113,17 @@ class neuronWrapper(object):
         """
 
         env_actions = actions[:,:,:self.neuron_bandwidth]
-        neron_actions = actions[:,:,:self.neuron_output]
+        neuron_actions = actions[:,:,:self.neuron_output]
 
         env_actions = self._reshape_actions(np.array(env_actions))
 
-        return env_actions, neron_actions
+        return env_actions, neuron_actions
 
     def reset(self) -> Tuple[np.ndarray, np.ndarray, Any]:
         """
         Will reset/setup the neurons states and the enviroment states. The enviroment is also reset in the step function
         """
+        self.env_steps = 0
 
         obs, _, other = self._env.reset()
 
@@ -137,7 +138,7 @@ class neuronWrapper(object):
         inital_state = np.random.random((obs.shape[0],self.num_unwrapped_agents,self.total_neurons_per_agent,self.neuron_input))
 
         self.out_obs = self._convert_observation(obs, inital_state)
-        self.out_shared = self._convert_observation(obs, inital_state)
+        self.out_shared = np.reshape(self.out_obs, (self.out_obs.shape[0], 1, self.n_agents*self.neuron_input))
 
         if self.out_obs.shape[0] == 1:
             self.rewards = np.zeros((self.n_agents,1))
@@ -153,37 +154,37 @@ class neuronWrapper(object):
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any]:
         """
-        Takes a step in the enviroment and neron states. The actions are the output of the neurons and they are converted for the enviroment.
+        Takes a step in the enviroment and neuron states. The actions are the output of the neurons and they are converted for the enviroment.
         """
 
         if len(actions.shape) == 2:
             actions = actions.reshape(1,actions.shape[0],actions.shape[1])
 
-        env_actions, neron_actions = self._convert_actions(actions)
+        env_actions, neuron_actions = self._convert_actions(actions)
 
-        neron_actions = np.stack(np.split(neron_actions, self.num_unwrapped_agents, axis=1))
-        neron_actions = neron_actions.reshape(neron_actions.shape[1],neron_actions.shape[0], neron_actions.shape[2], neron_actions.shape[3])
+        neuron_actions = np.stack(np.split(neuron_actions, self.num_unwrapped_agents, axis=1))
+        neuron_actions = neuron_actions.reshape(neuron_actions.shape[1],neuron_actions.shape[0], neuron_actions.shape[2], neuron_actions.shape[3])
 
-        neron_signal = neron_actions[...,:self.neuron_bandwidth]
-        neron_connect_positions = neron_actions[...,self.neuron_bandwidth:self.neuron_bandwidth+self.position_dims]
-        neron_weight_scale = neron_actions[...,self.neuron_bandwidth+self.position_dims:self.neuron_bandwidth+self.position_dims+1]
-        neron_velocity_direction = neron_actions[...,self.neuron_bandwidth+self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+1]
-        neron_velocity_scale = neron_actions[...,self.neuron_bandwidth+2*self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+2]
+        neuron_signal = neuron_actions[...,:self.neuron_bandwidth]
+        neuron_connect_positions = neuron_actions[...,self.neuron_bandwidth:self.neuron_bandwidth+self.position_dims]
+        neuron_weight_scale = neuron_actions[...,self.neuron_bandwidth+self.position_dims:self.neuron_bandwidth+self.position_dims+1]
+        neuron_velocity_direction = neuron_actions[...,self.neuron_bandwidth+self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+1]
+        neuron_velocity_scale = neuron_actions[...,self.neuron_bandwidth+2*self.position_dims+1:self.neuron_bandwidth+2*self.position_dims+2]
 
-        neron_velocity_direction = neron_velocity_direction/np.linalg.norm(neron_velocity_direction, axis=-1, keepdims=True)
-        neron_velocity = neron_velocity_direction*neron_velocity_scale * self.max_velocity
+        neuron_velocity_direction = neuron_velocity_direction/np.linalg.norm(neuron_velocity_direction, axis=-1, keepdims=True)
+        neuron_velocity = neuron_velocity_direction*neuron_velocity_scale * self.max_velocity
 
-        neron_velocity_penalty = np.linalg.norm(neron_velocity, axis=-1, keepdims=True) / self.max_velocity * self.movment_change_penalty
+        neuron_velocity_penalty = np.linalg.norm(neuron_velocity, axis=-1, keepdims=True) / self.max_velocity * self.movment_change_penalty
 
-        neuron_weight_scale = np.repeat(neron_weight_scale, self.total_neurons_per_agent, axis=3)
+        neuron_weight_scale = np.repeat(neuron_weight_scale, self.total_neurons_per_agent, axis=3)
 
         weights_sum = np.repeat(self._global_connections.sum(axis=3, keepdims=True), self.total_neurons_per_agent, axis=3)
         weights_sum[weights_sum == 0] = 1
         normalized_weights = self._global_connections / weights_sum
 
-        new_neuron_signals = np.matmul(normalized_weights, neron_signal)
+        new_neuron_signals = np.matmul(normalized_weights, neuron_signal)
 
-        pairwise_distances = self._pairwise_distances(neron_connect_positions,self._global_positions)
+        pairwise_distances = self._pairwise_distances(neuron_connect_positions,self._global_positions)
 
         pairwise_weights = self._remap_distances(pairwise_distances, scale=self.exp_decay_scale)
 
@@ -191,7 +192,7 @@ class neuronWrapper(object):
 
         weights_delta_penalty = np.abs(np.mean(weights_delta,-1)) / self.max_connection_change * self.connection_change_penalty
 
-        self._global_positions += neron_velocity
+        self._global_positions += neuron_velocity
 
         self._global_positions = np.clip(self._global_positions, -self.brain_size, self.brain_size)
 
@@ -201,7 +202,7 @@ class neuronWrapper(object):
 
         self.step_count += 1
 
-        rewards_modifier = np.zeros_like(self.rewards)#self.rewards*neron_velocity_penalty.reshape(self.rewards.shape) + self.rewards*weights_delta_penalty.reshape(self.rewards.shape)
+        rewards_modifier = np.zeros_like(self.rewards)#self.rewards*neuron_velocity_penalty.reshape(self.rewards.shape) + self.rewards*weights_delta_penalty.reshape(self.rewards.shape)
 
         if self.step_count == self.speed_factor:
             self.step_count = 0
@@ -223,6 +224,7 @@ class neuronWrapper(object):
                 obs, _, other = self._env.reset()
                 obs = np.array(obs)
                 self.reset_env_factor_count += 1
+                self.env_steps = 0
 
                 if self.reset_env_factor_count == self.reset_env_factor:
                     dones = np.ones_like(self.rewards).squeeze(axis=-1)
@@ -230,13 +232,14 @@ class neuronWrapper(object):
                 else:
                     dones = np.zeros_like(self.rewards).squeeze(axis=-1)
             else:
+                self.env_steps += 1
                 dones = np.zeros_like(self.rewards).squeeze(axis=-1)
 
             if len(obs.shape) == 2:
                 obs = obs.reshape(1,obs.shape[0],obs.shape[1])
 
             self.out_obs = self._convert_observation(obs,new_neuron_input)
-            self.out_shared = self._convert_observation(obs,new_neuron_input)
+            self.out_shared = np.reshape(self.out_obs, (self.out_obs.shape[0], 1, self.n_agents*self.neuron_input))
 
             if self.out_obs.shape[0] == 1:
                 return self.out_obs[0], self.out_shared[0], self.rewards, dones, self.infos, self.available_actions
@@ -246,7 +249,7 @@ class neuronWrapper(object):
         else:
 
             out_obs = new_neuron_input.reshape(new_neuron_input.shape[0], self.n_agents, self.neuron_input)
-            out_obs_shared = new_neuron_input.reshape(new_neuron_input.shape[0], self.n_agents, self.neuron_input)
+            out_obs_shared = out_obs.reshape(out_obs.shape[0], 1, self.neuron_input*self.n_agents)
 
             if out_obs.shape[0] == 1:
                 return out_obs[0], out_obs_shared[0], np.zeros_like(self.rewards), np.zeros_like(self.rewards).squeeze(axis=-1), self.infos, self.available_actions

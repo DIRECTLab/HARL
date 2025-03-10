@@ -19,7 +19,7 @@ class OnPolicyCriticBufferFP:
         """
         self.episode_length = args["episode_length"]
         self.n_rollout_threads = args["n_rollout_threads"]
-        self.hidden_sizes = args["hidden_sizes"]
+        self.hidden_sizes = args["critic_hidden_sizes"]
         self.rnn_hidden_size = self.hidden_sizes[-1]
         self.recurrent_n = args["recurrent_n"]
         self.gamma = args["gamma"]
