@@ -10,6 +10,7 @@ from harl.common.buffers.on_policy_critic_buffer_ep import OnPolicyCriticBufferE
 from harl.common.buffers.on_policy_critic_buffer_fp import OnPolicyCriticBufferFP
 from harl.algorithms.actors import ALGO_REGISTRY
 from harl.algorithms.critics.v_critic import VCritic
+from harl.algorithms.critics.v_critic_adv import VCriticAdv
 from harl.utils.trans_tools import _t2n
 from harl.utils.envs_tools import set_seed, get_num_agents, make_render_env, make_eval_env, make_train_env 
 from harl.utils.configs_tools import init_dir, save_config, get_task_name
@@ -144,7 +145,7 @@ class OnPolicyBaseRunnerAdversarial:
 
             share_observation_space = self.env.share_observation_space[0]
             
-            self.critic = VCritic(
+            self.critic = VCriticAdv(
                 {**algo_args["model"], **algo_args["algo"]},
                 share_observation_space,
                 device=self.device,
