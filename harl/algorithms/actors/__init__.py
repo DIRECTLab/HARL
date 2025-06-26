@@ -12,6 +12,7 @@ from harl.algorithms.actors.mappo import MAPPO
 
 ALGO_REGISTRY = {
     "happo": HAPPO,
+    "happo_adv": HAPPO,
     "hatrpo": HATRPO,
     "haa2c": HAA2C,
     "haddpg": HADDPG,

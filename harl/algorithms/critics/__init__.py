@@ -9,6 +9,7 @@ from harl.algorithms.critics.discrete_q_critic import DiscreteQCritic
 
 CRITIC_REGISTRY = {
     "happo": VCritic,
+    "happo_adv": VCritic,
     "hatrpo": VCritic,
     "haa2c": VCritic,
     "mappo": VCritic,
