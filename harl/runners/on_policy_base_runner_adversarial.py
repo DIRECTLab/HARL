@@ -145,11 +145,11 @@ class OnPolicyBaseRunnerAdversarial:
 
             share_observation_space = self.env.share_observation_space[0]
             
-            self.critic = VCriticAdv(
+            self.critics = {team : VCriticAdv(
                 {**algo_args["model"], **algo_args["algo"]},
                 share_observation_space,
                 device=self.device,
-            )
+            ) for team, _ in self.env.unwrapped.cfg.teams.items()}
 
             if self.state_type == "EP":
                 # EP stands for Environment Provided, as phrased by MAPPO paper.
@@ -207,7 +207,9 @@ class OnPolicyBaseRunnerAdversarial:
                 else:
                     for agent_id in range(self.num_agents):
                         self.actor[agent_id].lr_decay(episode, episodes)
-                self.critic.lr_decay(episode, episodes)
+                # self.critic.lr_decay(episode, episodes)
+                for _, critic in self.critics.items():
+                    critic.lr_decay(episode, episodes)
 
             self.logger.episode_init(
                 episode
@@ -380,7 +382,6 @@ class OnPolicyBaseRunnerAdversarial:
             action_log_probs = torch.stack(action_log_prob_collector).permute(1, 0, 2).contiguous()
             rnn_states = torch.stack(rnn_state_collector).permute(1, 0, 2, 3).contiguous()
 
-            # collect values, rnn_states_critic from 1 critic
             if self.state_type == "EP":
                 value, rnn_state_critic = self.critic.get_values(
                     self.critic_buffer.share_obs[step],
@@ -803,13 +804,15 @@ class OnPolicyBaseRunnerAdversarial:
         """Prepare for rollout."""
         for agent_id in range(self.num_agents):
             self.actor[agent_id].prep_rollout()
-        self.critic.prep_rollout()
+        for _, critic in self.critics.items():
+            critic.prep_rollout()
 
     def prep_training(self):
         """Prepare for training."""
         for agent_id in range(self.num_agents):
             self.actor[agent_id].prep_training()
-        self.critic.prep_training()
+        for _, critic in self.critics.items():
+            critic.prep_training()
 
     def save(self, directory):
         """Save model parameters."""
@@ -822,15 +825,17 @@ class OnPolicyBaseRunnerAdversarial:
                 policy_actor.state_dict(),
                 str(directory) + "/actor_agent" + str(agent_id) + ".pt",
             )
-        policy_critic = self.critic.critic
-        torch.save(
-            policy_critic.state_dict(), str(directory) + "/critic_agent" + ".pt"
-        )
-        if self.value_normalizer is not None:
+        
+        for team, critic in self.critics.items():
+            policy_critic = critic.critic
             torch.save(
-                self.value_normalizer.state_dict(),
-                str(directory) + "/value_normalizer" + ".pt",
+                policy_critic.state_dict(), str(directory) + f"/{team}_critic_agent" + ".pt"
             )
+            if self.value_normalizer is not None:
+                torch.save(
+                    self.value_normalizer.state_dict(),
+                    str(directory) + f"/{team}_value_normalizer" + ".pt",
+                )
 
     def restore(self):
         """Restore model parameters."""
@@ -843,15 +848,18 @@ class OnPolicyBaseRunnerAdversarial:
             )
             self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
         if not self.algo_args["render"]["use_render"]:
-            if os.path.exists(str(self.algo_args["train"]["model_dir"]) + "/critic_agent" + ".pt"):
+            for team, critic in self.critics.items():
+                # restore critic
                 policy_critic_state_dict = torch.load(
-                    str(self.algo_args["train"]["model_dir"]) + "/critic_agent" + ".pt"
+                    str(self.algo_args["train"]["model_dir"])
+                    + f"/{team}_critic_agent"
+                    + ".pt"
                 )
-                self.critic.critic.load_state_dict(policy_critic_state_dict)
+                critic.critic.load_state_dict(policy_critic_state_dict)
                 if self.value_normalizer is not None:
                     value_normalizer_state_dict = torch.load(
                         str(self.algo_args["train"]["model_dir"])
-                        + "/value_normalizer"
+                        + f"/{team}_value_normalizer"
                         + ".pt"
                     )
                     self.value_normalizer.load_state_dict(value_normalizer_state_dict)
