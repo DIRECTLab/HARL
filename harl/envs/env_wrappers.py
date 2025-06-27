@@ -654,6 +654,14 @@ class IsaacLabWrapper(object):
         shape = self.unwrapped.observation_spaces[max_obs_key].shape[-1]*len(self.unwrapped.observation_spaces.items())
         high = self.unwrapped.observation_spaces[max_obs_key].high.flatten()[-1]
         low = self.unwrapped.observation_spaces[max_obs_key].low.flatten()[-1]
+        # TODO: Update this so that the max shape is per agent per team, not all agents
+        if hasattr(self.env.unwrapped.cfg, "teams"):
+            shared_obs = dict()
+            for team, agents in self.unwrapped.cfg.teams.items():
+                shared_obs[team] = {}
+                for agent in agents:
+                    shared_obs[team] = gymnasium.spaces.Box(low, high, (shape,))
+            return shared_obs
 
         if not hasattr(self.unwrapped, "state_space") or self.unwrapped.state_space.shape[0] == 0:
             return {self._agent_map[k]: gymnasium.spaces.Box(low,high,(shape,)) for k in self.unwrapped.agents}

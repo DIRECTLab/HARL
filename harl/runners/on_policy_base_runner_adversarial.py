@@ -143,21 +143,24 @@ class OnPolicyBaseRunnerAdversarial:
                 )
                 self.actor_buffer.append(ac_bu)
 
-            share_observation_space = self.env.share_observation_space[0]
+            share_observation_space = self.env.share_observation_space
             
             self.critics = {team : VCriticAdv(
                 {**algo_args["model"], **algo_args["algo"]},
-                share_observation_space,
+                share_observation_space[team],
                 device=self.device,
             ) for team, _ in self.env.unwrapped.cfg.teams.items()}
 
             if self.state_type == "EP":
                 # EP stands for Environment Provided, as phrased by MAPPO paper.
                 # In EP, the global states for all agents are the same.
-                self.critic_buffer = OnPolicyCriticBufferEP(
-                    {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
-                    share_observation_space,
-                )
+                self.critic_buffers = {}
+                for team, _ in self.env.unwrapped.cfg.teams.items():
+                    self.critic_buffers[team] = OnPolicyCriticBufferEP(
+                        {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
+                        share_observation_space[team],
+                    )
+
             elif self.state_type == "FP":
                 # FP stands for Feature Pruned, as phrased by MAPPO paper.
                 # In FP, the global states for all agents are different, and thus needs the dimension of the number of agents.
@@ -340,6 +343,9 @@ class OnPolicyBaseRunnerAdversarial:
                     ].clone()
 
             if self.state_type == "EP":
+                for team, _ in self.critics.items():
+                    self.critic_buffers[team].share_obs = share_obs.clone()
+
                 self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
             elif self.state_type == "FP":
                 self.critic_buffer.share_obs[0] = share_obs.clone()
@@ -381,16 +387,24 @@ class OnPolicyBaseRunnerAdversarial:
             # actions = torch.tensor(action_collector).permute(1, 0, 2)
             action_log_probs = torch.stack(action_log_prob_collector).permute(1, 0, 2).contiguous()
             rnn_states = torch.stack(rnn_state_collector).permute(1, 0, 2, 3).contiguous()
-
+            values = []
+            rnn_states_critic = []
             if self.state_type == "EP":
-                value, rnn_state_critic = self.critic.get_values(
-                    self.critic_buffer.share_obs[step],
-                    self.critic_buffer.rnn_states_critic[step],
-                    self.critic_buffer.masks[step],
-                )
-                # (n_threads, dim)
-                values = value
-                rnn_states_critic = rnn_state_critic
+                for _, critic in self.critics.items():
+                    # EP stands for Environment Provided, as phrased by MAPPO paper.
+                    # In EP, the global states for all agents are the same.
+                    # (n_threads, dim)
+                    value, rnn_state_critic = critic.get_values(
+                        self.critic_buffer.share_obs[step],
+                        self.critic_buffer.rnn_states_critic[step],
+                        self.critic_buffer.masks[step],
+                    )
+                    values.append(value)
+                    rnn_states_critic.append(rnn_state_critic)
+                
+                values = torch.stack(values).permute(1, 0, 2).contiguous()
+                rnn_states_critic = torch.stack(rnn_states_critic).permute(1, 0, 2, 3).contiguous()
+
             elif self.state_type == "FP":
                 value, rnn_state_critic = self.critic.get_values(
                     torch.concatenate(self.critic_buffer.share_obs[step]),
@@ -849,20 +863,21 @@ class OnPolicyBaseRunnerAdversarial:
             self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
         if not self.algo_args["render"]["use_render"]:
             for team, critic in self.critics.items():
-                # restore critic
-                policy_critic_state_dict = torch.load(
-                    str(self.algo_args["train"]["model_dir"])
-                    + f"/{team}_critic_agent"
-                    + ".pt"
-                )
-                critic.critic.load_state_dict(policy_critic_state_dict)
-                if self.value_normalizer is not None:
-                    value_normalizer_state_dict = torch.load(
+                if os.path.exists(str(self.algo_args["train"]["model_dir"]) + f"/{team}_critic_agent" + ".pt"):
+                    # restore critic
+                    policy_critic_state_dict = torch.load(
                         str(self.algo_args["train"]["model_dir"])
-                        + f"/{team}_value_normalizer"
+                        + f"/{team}_critic_agent"
                         + ".pt"
                     )
-                    self.value_normalizer.load_state_dict(value_normalizer_state_dict)
+                    critic.critic.load_state_dict(policy_critic_state_dict)
+                    if self.value_normalizer is not None:
+                        value_normalizer_state_dict = torch.load(
+                            str(self.algo_args["train"]["model_dir"])
+                            + f"/{team}_value_normalizer"
+                            + ".pt"
+                        )
+                        self.value_normalizer.load_state_dict(value_normalizer_state_dict)
 
     def close(self):
         """Close environment, writter, and logger."""
