@@ -346,7 +346,6 @@ class OnPolicyBaseRunnerAdversarial:
                 for team, _ in self.critics.items():
                     self.critic_buffers[team].share_obs = share_obs.clone()
 
-                self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
             elif self.state_type == "FP":
                 self.critic_buffer.share_obs[0] = share_obs.clone()
 
@@ -390,14 +389,14 @@ class OnPolicyBaseRunnerAdversarial:
             values = []
             rnn_states_critic = []
             if self.state_type == "EP":
-                for _, critic in self.critics.items():
+                for team, critic in self.critics.items():
                     # EP stands for Environment Provided, as phrased by MAPPO paper.
                     # In EP, the global states for all agents are the same.
                     # (n_threads, dim)
                     value, rnn_state_critic = critic.get_values(
-                        self.critic_buffer.share_obs[step],
-                        self.critic_buffer.rnn_states_critic[step],
-                        self.critic_buffer.masks[step],
+                        self.critic_buffers[team].share_obs[step],
+                        self.critic_buffers[team].rnn_states_critic[step],
+                        self.critic_buffers[team].masks[step],
                     )
                     values.append(value)
                     rnn_states_critic.append(rnn_state_critic)
