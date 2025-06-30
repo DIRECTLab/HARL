@@ -386,8 +386,8 @@ class OnPolicyBaseRunnerAdversarial:
             # actions = torch.tensor(action_collector).permute(1, 0, 2)
             action_log_probs = torch.stack(action_log_prob_collector).permute(1, 0, 2).contiguous()
             rnn_states = torch.stack(rnn_state_collector).permute(1, 0, 2, 3).contiguous()
-            values = []
-            rnn_states_critic = []
+            values = {}
+            rnn_states_critic = {}
             if self.state_type == "EP":
                 for team, critic in self.critics.items():
                     # EP stands for Environment Provided, as phrased by MAPPO paper.
@@ -398,11 +398,8 @@ class OnPolicyBaseRunnerAdversarial:
                         self.critic_buffers[team].rnn_states_critic[step],
                         self.critic_buffers[team].masks[step],
                     )
-                    values.append(value)
-                    rnn_states_critic.append(rnn_state_critic)
-                
-                values = torch.stack(values).permute(1, 0, 2).contiguous()
-                rnn_states_critic = torch.stack(rnn_states_critic).permute(1, 0, 2, 3).contiguous()
+                    values[team] = value
+                    rnn_states_critic[team] = rnn_state_critic
 
             elif self.state_type == "FP":
                 value, rnn_state_critic = self.critic.get_values(
@@ -454,7 +451,7 @@ class OnPolicyBaseRunnerAdversarial:
         # If env is done, then reset rnn_state_critic to all zero
         if self.state_type == "EP":
             rnn_states_critic[dones_env == True] = torch.zeros(
-                ((dones_env == True).sum(), self.recurrent_n, self.rnn_hidden_size_critic),
+                ((dones_env == True).sum(), len(self.env.unwrapped.cfg.teams), self.recurrent_n, self.rnn_hidden_size_critic),
                 dtype=torch.float32, device=self.device
             )
         elif self.state_type == "FP":
@@ -528,15 +525,17 @@ class OnPolicyBaseRunnerAdversarial:
                 else None,
             )
 
+        # TODO: Fix rnn states to handle adversarial case
         if self.state_type == "EP":
-            self.critic_buffer.insert(
-                share_obs[:, 0],
-                rnn_states_critic,
-                values,
-                rewards[:, 0],
-                masks[:, 0],
-                bad_masks,
-            )
+            for team, _ in self.env.unwrapped.cfg.teams.items():
+                self.critic_buffers[team].insert(
+                    share_obs[team],
+                    rnn_states_critic[team],
+                    values[team],
+                    rewards[team],
+                    masks[:, 0],
+                    bad_masks,
+                )
         elif self.state_type == "FP":
             self.critic_buffer.insert(
                 share_obs, rnn_states_critic, values, rewards, masks, bad_masks

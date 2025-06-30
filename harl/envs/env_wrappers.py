@@ -433,6 +433,7 @@ class IsaacLabWrapper(object):
 
         self._agent_map = {agent: i for i, agent in enumerate(self.unwrapped.agents)}
         self._agent_map_inv = {i: agent for i, agent in enumerate(self.unwrapped.agents)}
+        self.is_adversarial = hasattr(self.unwrapped.cfg, "teams")
 
         # device
         if hasattr(self.unwrapped, "device"):
@@ -481,8 +482,16 @@ class IsaacLabWrapper(object):
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         _obs, _ = self._env.reset()
 
-        # turn obs into array with dims [batch, agent, *obs_shape]
-        _obs = [o for o in _obs.values()]
+        if self.is_adversarial:
+            _obs_temp = []
+            for team, agents in _obs.items():
+                for agent in agents.values():
+                    _obs_temp.append(agent)
+            _obs = _obs_temp
+        else:
+            # turn obs into array with dims [batch, agent, *obs_shape]
+            _obs = [o for o in _obs.values()]
+
         obs = self.stack_padded_tensors_last_axis(_obs, 0)
 
         if hasattr(self.unwrapped, "state"):
@@ -496,6 +505,45 @@ class IsaacLabWrapper(object):
             s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for _ in self.unwrapped.agents])
         
         return obs, s_obs, None
+    
+    def step_adversarial(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
+        _obs, _reward, terminated, truncated, info = self._env.step(actions)
+
+        s_obs = {}
+        obs = []
+        reward = {}
+        for team in self.cfg.teams.keys():
+            team_rewards = []
+            team_obs = []
+            for agent_obs in _obs[team].values():
+                team_obs.append(agent_obs)
+                obs.append(agent_obs)
+
+            for agent_reward in _reward[team].values():
+                team_rewards.append(agent_reward)
+
+            s_obs[team] = self.stack_padded_tensors_last_axis(team_obs, 0)
+            reward[team] = torch.stack(team_rewards)
+
+        obs = self.stack_padded_tensors_last_axis(obs, 0)
+        # TODO: Fix state to hande adversarial envs
+        # if hasattr(self.unwrapped, "state"):
+        #     s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
+        # else:
+        #     s_obs = [None]
+
+        
+        # if s_obs[0] != None:
+        #     s_obs = self.stack_padded_tensors_last_axis(s_obs)
+        # else:
+        #     s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for agent in self.unwrapped.agents])
+
+        terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
+        truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
+
+        dones = torch.logical_or(terminated, truncated)
+                
+        return obs, s_obs, reward, dones, info, None
 
     def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
         """Perform a step in the environment
@@ -510,6 +558,9 @@ class IsaacLabWrapper(object):
         """
 
         actions = {self._agent_map_inv[i]:actions[i][:,:self.action_space[i].shape[0]] for i in range(self.unwrapped.num_agents)}
+
+        if self.is_adversarial:
+            return self.step_adversarial(actions)
 
         _obs, reward, terminated, truncated, info = self._env.step(actions)
 
