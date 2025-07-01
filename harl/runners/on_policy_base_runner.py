@@ -512,7 +512,7 @@ class OnPolicyBaseRunner:
                 if available_actions[0] is not None
                 else None,
             )
-
+        # TODO: Figure out why share_obs, rewards, and masks have an extra dimension
         if self.state_type == "EP":
             self.critic_buffer.insert(
                 share_obs[:, 0],

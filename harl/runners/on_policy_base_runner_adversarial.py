@@ -344,7 +344,7 @@ class OnPolicyBaseRunnerAdversarial:
 
             if self.state_type == "EP":
                 for team, _ in self.critics.items():
-                    self.critic_buffers[team].share_obs = share_obs.clone()
+                    self.critic_buffers[team].share_obs[0] = share_obs[team][:, 0].clone()
 
             elif self.state_type == "FP":
                 self.critic_buffer.share_obs[0] = share_obs.clone()
@@ -529,10 +529,10 @@ class OnPolicyBaseRunnerAdversarial:
         if self.state_type == "EP":
             for team, _ in self.env.unwrapped.cfg.teams.items():
                 self.critic_buffers[team].insert(
-                    share_obs[team],
+                    share_obs[team][:, 0],
                     rnn_states_critic[team],
                     values[team],
-                    rewards[team],
+                    rewards[team][:, 0],
                     masks[:, 0],
                     bad_masks,
                 )

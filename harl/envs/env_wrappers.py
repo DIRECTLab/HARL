@@ -487,22 +487,30 @@ class IsaacLabWrapper(object):
             for team, agents in _obs.items():
                 for agent in agents.values():
                     _obs_temp.append(agent)
-            _obs = _obs_temp
+            obs = self.stack_padded_tensors_last_axis(_obs_temp, 0)
         else:
             # turn obs into array with dims [batch, agent, *obs_shape]
             _obs = [o for o in _obs.values()]
+            obs = self.stack_padded_tensors_last_axis(_obs, 0)
 
-        obs = self.stack_padded_tensors_last_axis(_obs, 0)
 
-        if hasattr(self.unwrapped, "state"):
-            s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
+        if self.is_adversarial:
+            s_obs = {}
+            for team, agents in _obs.items():
+                team_obs = []
+                for agent in agents.values():
+                    team_obs.append(agent)
+                s_obs[team] = self.stack_padded_tensors_last_axis(team_obs, 0)
         else:
-            s_obs = [None]
+            if hasattr(self.unwrapped, "state"):
+                s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
+            else:
+                s_obs = [None]
 
-        if s_obs[0] != None:
-            s_obs = self.stack_padded_tensors_last_axis(s_obs, 0)
-        else:
-            s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for _ in self.unwrapped.agents])
+            if s_obs[0] != None:
+                s_obs = self.stack_padded_tensors_last_axis(s_obs, 0)
+            else:
+                s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for _ in self.unwrapped.agents])
         
         return obs, s_obs, None
     
@@ -695,24 +703,36 @@ class IsaacLabWrapper(object):
     def share_observation_space(self) -> Mapping[int, gym.Space]:
         """Share observation space
         """
+
+        # TODO: Update this so that the max shape is per agent per team, not all agents
+        if self.is_adversarial:
+            shared_obs = dict()
+            for team, agents in self.unwrapped.cfg.teams.items():
+                max_obs_key = None
+                max_shape = 0
+                for agent in agents:
+                    val = self.unwrapped.observation_spaces[agent]
+                    if val.shape[-1] > max_shape:
+                        max_shape = val.shape[-1]
+                        max_obs_key = agent
+
+                shape = self.unwrapped.observation_spaces[max_obs_key].shape[-1]*len(agents)
+                high = self.unwrapped.observation_spaces[max_obs_key].high.flatten()[-1]
+                low = self.unwrapped.observation_spaces[max_obs_key].low.flatten()[-1]
+                shared_obs[team] = gymnasium.spaces.Box(low, high, (shape,))
+
+            return shared_obs
+        
         max_obs_key = None
         max_shape = 0
         for key, val in self.unwrapped.observation_spaces.items():
             if val.shape[-1] > max_shape:
                 max_shape = val.shape[-1]
                 max_obs_key = key
-
+        
         shape = self.unwrapped.observation_spaces[max_obs_key].shape[-1]*len(self.unwrapped.observation_spaces.items())
         high = self.unwrapped.observation_spaces[max_obs_key].high.flatten()[-1]
         low = self.unwrapped.observation_spaces[max_obs_key].low.flatten()[-1]
-        # TODO: Update this so that the max shape is per agent per team, not all agents
-        if hasattr(self.env.unwrapped.cfg, "teams"):
-            shared_obs = dict()
-            for team, agents in self.unwrapped.cfg.teams.items():
-                shared_obs[team] = {}
-                for agent in agents:
-                    shared_obs[team] = gymnasium.spaces.Box(low, high, (shape,))
-            return shared_obs
 
         if not hasattr(self.unwrapped, "state_space") or self.unwrapped.state_space.shape[0] == 0:
             return {self._agent_map[k]: gymnasium.spaces.Box(low,high,(shape,)) for k in self.unwrapped.agents}
