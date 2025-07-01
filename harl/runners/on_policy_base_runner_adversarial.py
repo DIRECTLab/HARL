@@ -173,9 +173,11 @@ class OnPolicyBaseRunnerAdversarial:
                 raise NotImplementedError
 
             if self.algo_args["train"]["use_valuenorm"] is True:
-                self.value_normalizer = ValueNorm(1, device=self.device)
+                self.value_normalizers = dict()
+                for team, _ in self.critics.items():
+                    self.value_normalizers[team] = ValueNorm(1, device=self.device)
             else:
-                self.value_normalizer = None
+                self.value_normalizers = None
             
             self.logger = LOGGER_REGISTRY[args["env"]](
                 args, algo_args, env_args, self.num_agents, self.writter, self.run_dir
@@ -546,24 +548,25 @@ class OnPolicyBaseRunnerAdversarial:
         Compute critic evaluation of the last state,
         and then let buffer compute returns, which will be used during training.
         """
-        with torch.inference_mode():
-            if self.state_type == "EP":
-                next_value, _ = self.critic.get_values(
-                    self.critic_buffer.share_obs[-1],
-                    self.critic_buffer.rnn_states_critic[-1],
-                    self.critic_buffer.masks[-1],
-                )
-                next_value = next_value
-            elif self.state_type == "FP":
-                next_value, _ = self.critic.get_values(
-                    torch.concatenate(self.critic_buffer.share_obs[-1]),
-                    torch.concatenate(self.critic_buffer.rnn_states_critic[-1]),
-                    torch.concatenate(self.critic_buffer.masks[-1]),
-                )
-                next_value = torch.tensor(
-                    torch.split(next_value), self.algo_args["train"]["n_rollout_threads"]
-                )
-            self.critic_buffer.compute_returns(next_value, self.value_normalizer)
+        for team, critic in self.critics.items():
+            with torch.inference_mode():
+                if self.state_type == "EP":
+                    next_value, _ = self.critics[team].get_values(
+                        self.critic_buffers[team].share_obs[-1],
+                        self.critic_buffers[team].rnn_states_critic[-1],
+                        self.critic_buffers[team].masks[-1],
+                    )
+                    next_value = next_value
+                elif self.state_type == "FP":
+                    next_value, _ = self.critic.get_values(
+                        torch.concatenate(self.critic_buffer.share_obs[-1]),
+                        torch.concatenate(self.critic_buffer.rnn_states_critic[-1]),
+                        torch.concatenate(self.critic_buffer.masks[-1]),
+                    )
+                    next_value = torch.tensor(
+                        torch.split(next_value), self.algo_args["train"]["n_rollout_threads"]
+                    )
+                self.critic_buffers[team].compute_returns(next_value, self.value_normalizers[team])
 
     def train(self):
         """Train the model."""
@@ -843,9 +846,9 @@ class OnPolicyBaseRunnerAdversarial:
             torch.save(
                 policy_critic.state_dict(), str(directory) + f"/{team}_critic_agent" + ".pt"
             )
-            if self.value_normalizer is not None:
+            if self.value_normalizers is not None:
                 torch.save(
-                    self.value_normalizer.state_dict(),
+                    self.value_normalizers[team].state_dict(),
                     str(directory) + f"/{team}_value_normalizer" + ".pt",
                 )
 
@@ -869,13 +872,13 @@ class OnPolicyBaseRunnerAdversarial:
                         + ".pt"
                     )
                     critic.critic.load_state_dict(policy_critic_state_dict)
-                    if self.value_normalizer is not None:
+                    if self.value_normalizers is not None:
                         value_normalizer_state_dict = torch.load(
                             str(self.algo_args["train"]["model_dir"])
                             + f"/{team}_value_normalizer"
                             + ".pt"
                         )
-                        self.value_normalizer.load_state_dict(value_normalizer_state_dict)
+                        self.value_normalizers[team].load_state_dict(value_normalizer_state_dict)
 
     def close(self):
         """Close environment, writter, and logger."""

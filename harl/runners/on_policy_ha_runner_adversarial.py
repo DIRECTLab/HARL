@@ -23,15 +23,16 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
             dtype=torch.float32, device=self.device,
         )
 
-        # compute advantages
-        if self.value_normalizer is not None:
-            advantages = self.critic_buffer.returns[
-                :-1
-            ] - self.value_normalizer.denormalize(self.critic_buffer.value_preds[:-1])
-        else:
-            advantages = (
-                self.critic_buffer.returns[:-1] - self.critic_buffer.value_preds[:-1]
-            )
+        for team, _ in self.critics.items():
+            # compute advantages
+            if self.value_normalizers is not None:
+                advantages = self.critic_buffers[team].returns[
+                    :-1
+                ] - self.value_normalizers[team].denormalize(self.critic_buffers[team].value_preds[:-1])
+            else:
+                advantages = (
+                    self.critic_buffers[team].returns[:-1] - self.critic_buffers[team].value_preds[:-1]
+                )
 
         # normalize advantages for FP
         if self.state_type == "FP":
@@ -128,7 +129,9 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
             
             actor_train_infos.append(actor_train_info)
 
+        critic_train_infos = {}
         # update critic
-        critic_train_info = self.critic.train(self.critic_buffer, self.value_normalizer)
+        for team, _ in self.critics.items():
+            critic_train_infos[team] = self.critics[team].train(self.critic_buffers[team], self.value_normalizers[team])
 
-        return actor_train_infos, critic_train_info
+        return actor_train_infos, critic_train_infos
