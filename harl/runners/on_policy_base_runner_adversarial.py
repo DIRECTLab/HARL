@@ -305,7 +305,7 @@ class OnPolicyBaseRunnerAdversarial:
                     actor_train_infos,
                     critic_train_info,
                     self.actor_buffer,
-                    self.critic_buffer,
+                    self.critic_buffers,
                 )
 
 
@@ -579,7 +579,9 @@ class OnPolicyBaseRunnerAdversarial:
         """
         for agent_id in range(self.num_agents):
             self.actor_buffer[agent_id].after_update()
-        self.critic_buffer.after_update()
+        
+        for team, _ in self.critics.items():
+            self.critic_buffers[team].after_update()
 
     @torch.no_grad()
     def eval(self):

@@ -107,12 +107,25 @@ class IsaacLabLogger(BaseLogger):
 
             print("Total Reward is {}.".format(self.total_reward))
         
+        if isinstance(critic_buffer, dict):
+            # If critic_buffer is a dictionary (e.g., for multi-agent scenarios)
+            critic_train_info = {}
+            for team, buffer in critic_buffer.items():
+                critic_train_info[f"average_step_rewards_{team}"] = buffer.get_mean_rewards()
+                print(
+                    "Average step reward for {} is {}.\n".format(
+                        team, critic_train_info[f"average_step_rewards_{team}"]
+                    )
+                )
 
-        critic_train_info["average_step_rewards"] = critic_buffer.get_mean_rewards()
+        else:
+            critic_train_info["average_step_rewards"] = critic_buffer.get_mean_rewards()
+            print(
+                "Average step reward is {}.\n".format(
+                    critic_train_info["average_step_rewards"]
+                )
+            )
+
         self.log_train(actor_train_infos, critic_train_info)
 
-        print(
-            "Average step reward is {}.\n".format(
-                critic_train_info["average_step_rewards"]
-            )
-        )
+
