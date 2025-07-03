@@ -515,7 +515,11 @@ class IsaacLabWrapper(object):
         return obs, s_obs, None
     
     def step_adversarial(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
-        _obs, _reward, terminated, truncated, info = self._env.step(actions)
+        _actions = {}
+        for team, agents in self.unwrapped.cfg.teams.items():
+            for agent in agents:
+                _actions[agent] = actions[self._agent_map[agent]][:,:self.action_space[team][agent].shape[0]]
+        _obs, _reward, terminated, truncated, info = self._env.step(_actions)
 
         s_obs = {}
         obs = []
@@ -534,7 +538,7 @@ class IsaacLabWrapper(object):
             reward[team] = torch.stack(team_rewards)
 
         obs = self.stack_padded_tensors_last_axis(obs, 0)
-        # TODO: Fix state to hande adversarial envs
+        # TODO: Fix state to handle adversarial envs
         # if hasattr(self.unwrapped, "state"):
         #     s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
         # else:
@@ -546,8 +550,10 @@ class IsaacLabWrapper(object):
         # else:
         #     s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for agent in self.unwrapped.agents])
 
+
         terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
         truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
+
 
         dones = torch.logical_or(terminated, truncated)
                 
@@ -564,11 +570,11 @@ class IsaacLabWrapper(object):
         :return: Observation, reward, terminated, truncated, info
         :rtype: tuple of dictionaries of torch.Tensor and any other info
         """
+        if self.is_adversarial:
+            return self.step_adversarial(actions)
 
         actions = {self._agent_map_inv[i]:actions[i][:,:self.action_space[i].shape[0]] for i in range(self.unwrapped.num_agents)}
 
-        if self.is_adversarial:
-            return self.step_adversarial(actions)
 
         _obs, reward, terminated, truncated, info = self._env.step(actions)
 
@@ -691,12 +697,35 @@ class IsaacLabWrapper(object):
     def observation_space(self) -> Mapping[int, gym.Space]:
         """Observation spaces
         """
-        return {self._agent_map[k]: gymnasium.spaces.Box(v.low.flatten()[-1],v.high.flatten()[-1],(v.shape[-1],)) for k, v in self.unwrapped.observation_spaces.items()}
+        if self.is_adversarial:
+            obs = dict()
+            for team, agents in self.unwrapped.cfg.teams.items():
+                obs[team] = dict()
+                for agent in agents:
+                    low = self.unwrapped.observation_spaces[agent].low.flatten()[-1]
+                    high = self.unwrapped.observation_spaces[agent].high.flatten()[-1]
+                    shape = (self.unwrapped.observation_spaces[agent].shape[-1],)
+                    obs[team][agent] = gymnasium.spaces.Box(low,high,shape) 
+
+            return obs
+        else:
+            return {self._agent_map[k]: gymnasium.spaces.Box(v.low.flatten()[-1],v.high.flatten()[-1],(v.shape[-1],)) for k, v in self.unwrapped.observation_spaces.items()}
 
     @property
     def action_space(self) -> Mapping[int, gym.Space]:
         """Action spaces
         """
+        if self.is_adversarial:
+            action_space = dict()
+            for team, agents in self.unwrapped.cfg.teams.items():
+                action_space[team] = dict()
+                for agent in agents:
+                    low = self.unwrapped.action_spaces[agent].low.flatten()[-1]
+                    high = self.unwrapped.action_spaces[agent].high.flatten()[-1]
+                    shape = (self.unwrapped.action_spaces[agent].shape[-1],)
+                    action_space[team][agent] = gymnasium.spaces.Box(low,high,shape) 
+
+            return action_space
         return {self._agent_map[k]: gymnasium.spaces.Box(v.low.flatten()[-1],v.high.flatten()[-1],(v.shape[-1],)) for k, v in self.unwrapped.action_spaces.items()}
     
     @property

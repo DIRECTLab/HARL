@@ -93,15 +93,13 @@ class OnPolicyBaseRunnerAdversarial:
         print("observation_space: ", self.env.observation_space)
         print("action_space: ", self.env.action_space)
 
-        self.is_heter_action_space = False
+        self.is_heter_action_space = True
         self.max_action_space = 0
 
-        first_act_space = self.env.action_space[0]
-        for key, val in self.env.action_space.items():
-            if val.shape[0] > self.max_action_space:
-                self.max_action_space =  val.shape[0] 
-            if val != first_act_space and not self.is_heter_action_space:
-                self.is_heter_action_space = True
+        for team, _ in self.env.unwrapped.cfg.teams.items():
+            for _, val in self.env.action_space[team].items():
+                if val.shape[0] > self.max_action_space:
+                    self.max_action_space =  val.shape[0] 
 
         # actor
         if self.share_param:
@@ -123,25 +121,30 @@ class OnPolicyBaseRunnerAdversarial:
                 ), "Agents have heterogeneous action spaces, parameter sharing is not valid."
                 self.actor.append(self.actor[0])
         else:
-            self.actor = []
-            for agent_id in range(self.num_agents):
-                agent = ALGO_REGISTRY[args["algo"]](
-                    {**algo_args["model"], **algo_args["algo"]},
-                    self.env.observation_space[agent_id],
-                    self.env.action_space[agent_id],
-                    device=self.device,
-                )
-                self.actor.append(agent)
+            self.actors = {}
+            for team, agents in self.env.unwrapped.cfg.teams.items():
+                self.actors[team] = {}
+                for agent_id in agents:
+                    agent = ALGO_REGISTRY[args["algo"]](
+                        {**algo_args["model"], **algo_args["algo"]},
+                        self.env.observation_space[team][agent_id],
+                        self.env.action_space[team][agent_id],
+                        device=self.device,
+                    )
+                    self.actors[team][agent_id] = agent
+
         algo_args["model"]["hidden_sizes"] = self.hidden_sizes_critic
         if self.algo_args["render"]["use_render"] is False:  # train, not render
-            self.actor_buffer = []
-            for agent_id in range(self.num_agents):
-                ac_bu = OnPolicyActorBuffer(
-                    {**algo_args["train"], **algo_args["model"]},
-                    self.env.observation_space[agent_id],
-                    self.env.action_space[agent_id],
-                )
-                self.actor_buffer.append(ac_bu)
+            self.actor_buffers = {}
+            for team, agents in self.env.unwrapped.cfg.teams.items():
+                self.actor_buffers[team] = {}
+                for agent_id in agents:
+                    ac_bu = OnPolicyActorBuffer(
+                        {**algo_args["train"], **algo_args["model"]},
+                        self.env.observation_space[team][agent_id],
+                        self.env.action_space[team][agent_id],
+                    )
+                    self.actor_buffers[team][agent_id] = ac_bu
 
             share_observation_space = self.env.share_observation_space
             
@@ -304,7 +307,7 @@ class OnPolicyBaseRunnerAdversarial:
                 self.logger.episode_log(
                     actor_train_infos,
                     critic_train_info,
-                    self.actor_buffer,
+                    self.actor_buffers,
                     self.critic_buffers,
                 )
 
@@ -336,13 +339,14 @@ class OnPolicyBaseRunnerAdversarial:
             else:
                 self.not_tensor = False
             # replay buffer
-            for agent_id in range(self.num_agents):
-                obs_space = self.env.observation_space[agent_id].shape[0]
-                self.actor_buffer[agent_id].obs[0] = obs[:, agent_id, :obs_space].clone()
-                if self.actor_buffer[agent_id].available_actions is not None:
-                    self.actor_buffer[agent_id].available_actions[0] = available_actions[
-                        :, agent_id
-                    ].clone()
+            for team, agents in self.env.unwrapped.cfg.teams.items():
+                for agent_id in agents:
+                    obs_space = self.env.observation_space[team][agent_id].shape[0]
+                    self.actor_buffers[team][agent_id].obs[0] = obs[:, self.env.env._agent_map[agent_id], :obs_space].clone()
+                    if self.actor_buffers[team][agent_id].available_actions is not None:
+                        self.actor_buffers[team][agent_id].available_actions[0] = available_actions[
+                            :, self.env.env._agent_map[agent_id]
+                        ].clone()
 
             if self.state_type == "EP":
                 for team, _ in self.critics.items():
@@ -363,18 +367,19 @@ class OnPolicyBaseRunnerAdversarial:
             action_collector = []
             action_log_prob_collector = []
             rnn_state_collector = []
-            for agent_id in range(self.num_agents):
-                action, action_log_prob, rnn_state = self.actor[agent_id].get_actions(
-                    self.actor_buffer[agent_id].obs[step],
-                    self.actor_buffer[agent_id].rnn_states[step],
-                    self.actor_buffer[agent_id].masks[step],
-                    self.actor_buffer[agent_id].available_actions[step]
-                    if self.actor_buffer[agent_id].available_actions is not None
-                    else None,
-                )
-                action_collector.append(action)
-                action_log_prob_collector.append(action_log_prob)
-                rnn_state_collector.append(rnn_state)
+            for team, agents in self.env.unwrapped.cfg.teams.items():
+                for agent_id in agents:
+                    action, action_log_prob, rnn_state = self.actors[team][agent_id].get_actions(
+                        self.actor_buffers[team][agent_id].obs[step],
+                        self.actor_buffers[team][agent_id].rnn_states[step],
+                        self.actor_buffers[team][agent_id].masks[step],
+                        self.actor_buffers[team][agent_id].available_actions[step]
+                        if self.actor_buffers[team][agent_id].available_actions is not None
+                        else None,
+                    )
+                    action_collector.append(action)
+                    action_log_prob_collector.append(action_log_prob)
+                    rnn_state_collector.append(rnn_state)
             # (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
 
             if self.is_heter_action_space:
@@ -514,18 +519,20 @@ class OnPolicyBaseRunnerAdversarial:
                 ]
             )
 
-        for agent_id in range(self.num_agents):
-            self.actor_buffer[agent_id].insert(
-                obs[:, agent_id],
-                rnn_states[:, agent_id],
-                actions[:, agent_id],
-                action_log_probs[:, agent_id],
-                masks[:, agent_id],
-                active_masks[:, agent_id],
-                available_actions[:, agent_id]
-                if available_actions[0] is not None
-                else None,
-            )
+        for team, agents in self.env.unwrapped.cfg.teams.items():
+            for agent_id in agents:
+                agent_num = self.env.env._agent_map[agent_id]
+                self.actor_buffers[team][agent_id].insert(
+                    obs[:, agent_num],
+                    rnn_states[:, agent_num],
+                    actions[:, agent_num],
+                    action_log_probs[:, agent_num],
+                    masks[:, agent_num],
+                    active_masks[:, agent_num],
+                    available_actions[:, agent_num]
+                    if available_actions[0] is not None
+                    else None,
+                )
 
         # TODO: Fix rnn states to handle adversarial case
         if self.state_type == "EP":
@@ -577,8 +584,10 @@ class OnPolicyBaseRunnerAdversarial:
         After an update, copy the data at the last step to the first position of the buffer.
         This will be used for then generating new actions.
         """
-        for agent_id in range(self.num_agents):
-            self.actor_buffer[agent_id].after_update()
+
+        for team, agents in self.env.unwrapped.cfg.teams.items():
+            for agent_id in agents:
+                self.actor_buffers[team][agent_id].after_update()
         
         for team, _ in self.critics.items():
             self.critic_buffers[team].after_update()
@@ -819,15 +828,18 @@ class OnPolicyBaseRunnerAdversarial:
 
     def prep_rollout(self):
         """Prepare for rollout."""
-        for agent_id in range(self.num_agents):
-            self.actor[agent_id].prep_rollout()
+        for team, agents in self.env.unwrapped.cfg.teams.items():
+            for agent_id in agents:
+                self.actors[team][agent_id].prep_rollout()
+
         for _, critic in self.critics.items():
             critic.prep_rollout()
 
     def prep_training(self):
         """Prepare for training."""
-        for agent_id in range(self.num_agents):
-            self.actor[agent_id].prep_training()
+        for team, agents in self.env.unwrapped.cfg.teams.items():
+            for agent_id in agents:
+                self.actors[team][agent_id].prep_training()
         for _, critic in self.critics.items():
             critic.prep_training()
 
@@ -836,12 +848,13 @@ class OnPolicyBaseRunnerAdversarial:
         if not os.path.exists(directory):
             os.mkdir(directory)
 
-        for agent_id in range(self.num_agents):
-            policy_actor = self.actor[agent_id].actor
-            torch.save(
-                policy_actor.state_dict(),
-                str(directory) + "/actor_agent" + str(agent_id) + ".pt",
-            )
+        for team, agents in self.env.unwrapped.cfg.teams.items():
+            for agent_id in agents:
+                policy_actor = self.actors[team][agent_id].actor
+                torch.save(
+                    policy_actor.state_dict(),
+                    str(directory) + "/actor_agent_" + str(agent_id) + ".pt",
+                )
         
         for team, critic in self.critics.items():
             policy_critic = critic.critic

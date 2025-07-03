@@ -39,17 +39,20 @@ class IsaacLabLogger(BaseLogger):
                 # (e.g., store the mean, store the entire array, etc.)
                 self.other_data_log[key].append(float(val))
 
-    def log_train(self, actor_train_infos, critic_train_info):
+    def log_actor(self, actor_train_infos):
         """Log training information."""
         # log actor
         for agent_id in range(self.num_agents):
             for k, v in actor_train_infos[agent_id].items():
                 agent_k = "agent%i/" % agent_id + k
                 self.writter.add_scalar(agent_k, v, self.total_num_steps)
-        # log critic
+
+    def log_critic(self, critic_train_info):
+        """Log critic training information."""
         for k, v in critic_train_info.items():
             critic_k = "critic/" + k
             self.writter.add_scalar(critic_k, v, self.total_num_steps)
+
 
     def episode_log(
         self,
@@ -107,17 +110,18 @@ class IsaacLabLogger(BaseLogger):
 
             print("Total Reward is {}.".format(self.total_reward))
         
+        self.log_actor(actor_train_infos)
         if isinstance(critic_buffer, dict):
-            # If critic_buffer is a dictionary (e.g., for multi-agent scenarios)
-            critic_train_info = {}
             for team, buffer in critic_buffer.items():
-                critic_train_info[f"average_step_rewards_{team}"] = buffer.get_mean_rewards()
+                critic_train_info[team][f"average_step_rewards_{team}"] = buffer.get_mean_rewards()
                 print(
                     "Average step reward for {} is {}.\n".format(
-                        team, critic_train_info[f"average_step_rewards_{team}"]
+                        team, critic_train_info[team][f"average_step_rewards_{team}"]
                     )
                 )
-
+                for k, v in critic_train_info[team].items():
+                    critic_k = f"critic/{team}/" + k
+                    self.writter.add_scalar(critic_k, v, self.total_num_steps)
         else:
             critic_train_info["average_step_rewards"] = critic_buffer.get_mean_rewards()
             print(
@@ -125,7 +129,7 @@ class IsaacLabLogger(BaseLogger):
                     critic_train_info["average_step_rewards"]
                 )
             )
+            self.log_critic(critic_train_info)
 
-        self.log_train(actor_train_infos, critic_train_info)
 
 
