@@ -58,14 +58,14 @@ class IsaacLabEnv:
 
         self.env = gym.make(env_args['task'], cfg=env_args['config'], render_mode="rgb_array")
         
-        # if env_args['video_settings']['video']:
-        #     video_kwargs = {
-        #         "video_folder": os.path.join(env_args['video_settings']['log_dir'], "train"),
-        #         "step_trigger": lambda step: step % env_args['video_settings']['video_interval'] == 0,
-        #         "video_length": env_args['video_settings']['video_length'],
-        #         "disable_logger": True,
-        #     }
-        #     self.env = IsaacVideoWrapper(self.env, **video_kwargs)
+        if env_args['video_settings']['video']:
+            video_kwargs = {
+                "video_folder": os.path.join(env_args['video_settings']['log_dir'], "train"),
+                "step_trigger": lambda step: step % env_args['video_settings']['video_interval'] == 0,
+                "video_length": env_args['video_settings']['video_length'],
+                "disable_logger": True,
+            }
+            self.env = gym.wrappers.RecordVideo(self.env, **video_kwargs)
 
         self.env = IsaacLabWrapper(self.env)
 
