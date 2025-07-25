@@ -98,4 +98,4 @@ class IsaacLabEnv:
         return obs, s_obs, [None] * self.env_args["n_threads"]
 
     def close(self):
-        pass
+        self.unwrapped.sim._disable_app_control_on_stop_handle = True
