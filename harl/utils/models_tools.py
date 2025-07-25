@@ -14,7 +14,7 @@ def init_device(args):
     """
     if args["cuda"] and torch.cuda.is_available():
         print("choose to use gpu...")
-        if gpu_id in args:
+        if "gpu_id" in args:
             gpu_id = args["gpu_id"]
             device = torch.device(f"cuda:{gpu_id}")
         else:
