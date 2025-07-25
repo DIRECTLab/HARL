@@ -14,7 +14,11 @@ def init_device(args):
     """
     if args["cuda"] and torch.cuda.is_available():
         print("choose to use gpu...")
-        device = torch.device("cuda:0")
+        if args["gpu_id"] is not None:
+            gpu_id = args["gpu_id"]
+            device = torch.device(f"cuda:{gpu_id}")
+        else:
+            device = torch.device("cuda:0")
         if args["cuda_deterministic"]:
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
