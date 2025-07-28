@@ -56,7 +56,7 @@ def flatten_dict_to_numpy(d, parent_key="", sep="."):
 class IsaacLabEnv:
     def __init__(self, env_args):
 
-        self.env = gym.make(env_args['task'], cfg=env_args['config'], render_mode="rgb_array")
+        self.env = gym.make(env_args['task'], cfg=env_args['config'], render_mode="rgb_array", **env_args)
         
         if env_args['video_settings']['video']:
             video_kwargs = {
