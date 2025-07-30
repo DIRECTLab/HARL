@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 from harl.utils.models_tools import init, get_active_func, get_init_method
 from harl.models.base.flatten import Flatten
 
@@ -63,6 +64,55 @@ class CNNLayer(nn.Module):
         x = x / 255.0
         x = self.cnn(x)
         return x
+    
+
+class CNNLayerCustom(nn.Module):
+    def __init__(self, obs_shape=(3, 256, 256), hidden_sizes=[1024, 512], **kwargs):
+        super(CNNLayerCustom, self).__init__()
+
+
+        self.features = nn.Sequential(
+            nn.Conv2d(obs_shape[0], 32, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+
+            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+
+            nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+
+            Flatten()
+        )
+
+        # Calculate final feature size dynamically
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, *obs_shape)
+            n_flatten = self.features(dummy_input).shape[1]
+
+        self.classifier = nn.Sequential(
+            nn.Linear(n_flatten, hidden_sizes[0]),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_sizes[0], hidden_sizes[1]),
+            nn.ReLU()
+        )
+
+    def forward(self, x):
+        x = x / 255.0  # Normalize pixel values
+        x = self.features(x)
+        x = self.classifier(x)
+        return x
 
 
 class CNNBase(nn.Module):
@@ -75,11 +125,11 @@ class CNNBase(nn.Module):
         self.activation_func = args["activation_func"]
         self.hidden_sizes = args["hidden_sizes"]
 
-        self.cnn = CNNLayer(
+        self.cnn = CNNLayerCustom(
             obs_shape,
             self.hidden_sizes,
-            self.initialization_method,
-            self.activation_func,
+            # self.initialization_method,
+            # self.activation_func,
         )
 
     def forward(self, x):

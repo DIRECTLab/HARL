@@ -464,6 +464,8 @@ class IsaacLabWrapper(object):
         s_obs = []
 
         for _, observation in _obs.items():
+            if len(observation.shape) > 2:
+                observation = observation.reshape(observation.shape[0], -1)
             s_obs.append(observation)
         
         s_obs = torch.concat(s_obs, dim=-1)
@@ -528,6 +530,8 @@ class IsaacLabWrapper(object):
         s_obs = []
 
         for _, observation in _obs.items():
+            if len(observation.shape) > 2:
+                observation = observation.reshape(observation.shape[0], -1)
             s_obs.append(observation)
         
         s_obs = torch.concat(s_obs, dim=-1)
@@ -643,8 +647,8 @@ class IsaacLabWrapper(object):
     def observation_space(self) -> Mapping[int, gym.Space]:
         """Observation spaces
         """
+        obs = dict()
         if self.is_adversarial:
-            obs = dict()
             for team, agents in self.unwrapped.cfg.teams.items():
                 obs[team] = dict()
                 for agent in agents:
@@ -655,7 +659,19 @@ class IsaacLabWrapper(object):
 
             return obs
         else:
-            return {self._agent_map[k]: gymnasium.spaces.Box(v.low.flatten()[-1],v.high.flatten()[-1],(v.shape[-1],)) for k, v in self.unwrapped.observation_spaces.items()}
+            for agent, val in self.unwrapped.observation_spaces.items():
+                if type(val) is gymnasium.spaces.Tuple:
+                    shape = []
+                    for v in val:
+                        shape.append(v.shape[-1])
+                    obs[self._agent_map[agent]] = gymnasium.spaces.Box(
+                        -np.inf, np.inf, shape
+                    )
+                else:
+                    obs[self._agent_map[agent]] = gymnasium.spaces.Box(
+                        -np.inf, np. inf, (val.shape[-1],)
+                    )
+            return obs
 
     @property
     def action_space(self) -> Mapping[int, gym.Space]:
@@ -700,7 +716,14 @@ class IsaacLabWrapper(object):
         
         shape = 0
         for _, val in self.unwrapped.observation_spaces.items():
-            shape += val.shape[-1]
+            # handle the case where the observation space is an image
+            if type(val) is gymnasium.spaces.Tuple:
+                total_shape = 1
+                for v in val:
+                    total_shape *= v.shape[-1]
+                shape += total_shape
+            else:
+                shape += val.shape[-1]
 
         return {self._agent_map[k]: gymnasium.spaces.Box(-np.inf, np.inf, (shape,)) for k, _ in self.unwrapped.observation_spaces.items()}
 
