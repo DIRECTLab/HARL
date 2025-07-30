@@ -319,28 +319,20 @@ class OnPolicyBaseRunner:
     def warmup(self):
         """Warm up the replay buffer."""
         # reset env
-        with torch.inference_mode():
-            obs, share_obs, available_actions = self.env.reset()
-            #check if obs is already a torch tensor
-            if not isinstance(obs, torch.Tensor):
-                obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
-                share_obs = torch.tensor(share_obs, dtype=torch.float32, device=self.device)
-                self.not_tensor = True
-            else:
-                self.not_tensor = False
-            # replay buffer
-            for agent_id in range(self.num_agents):
-                obs_space = self.env.observation_space[agent_id].shape[0]
-                self.actor_buffer[agent_id].obs[0] = obs[:, agent_id, :obs_space].clone()
-                if self.actor_buffer[agent_id].available_actions is not None:
-                    self.actor_buffer[agent_id].available_actions[0] = available_actions[
-                        :, agent_id
-                    ].clone()
+        obs, share_obs, available_actions = self.env.reset()
 
-            if self.state_type == "EP":
-                self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
-            elif self.state_type == "FP":
-                self.critic_buffer.share_obs[0] = share_obs.clone()
+        # replay buffer
+        for agent_id, (_, agent_observation) in enumerate(obs.items()):
+            self.actor_buffer[agent_id].obs[0] = agent_observation
+            if self.actor_buffer[agent_id].available_actions is not None:
+                self.actor_buffer[agent_id].available_actions[0] = available_actions[
+                    :, agent_id
+                ].clone()
+
+        if self.state_type == "EP":
+            self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
+        elif self.state_type == "FP":
+            self.critic_buffer.share_obs[0] = share_obs.clone()
 
     def collect(self, step):
         """Collect actions and values from actors and critics.

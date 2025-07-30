@@ -482,37 +482,14 @@ class IsaacLabWrapper(object):
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         _obs, _ = self._env.reset()
 
-        if self.is_adversarial:
-            _obs_temp = []
-            for team, agents in _obs.items():
-                for agent in agents.values():
-                    _obs_temp.append(agent)
-            obs = self.stack_padded_tensors_last_axis(_obs_temp, 0)
-        else:
-            # turn obs into array with dims [batch, agent, *obs_shape]
-            _obs = [o for o in _obs.values()]
-            obs = self.stack_padded_tensors_last_axis(_obs, 0)
+        s_obs = []
 
-
-        if self.is_adversarial:
-            s_obs = {}
-            for team, agents in _obs.items():
-                team_obs = []
-                for agent in agents.values():
-                    team_obs.append(agent)
-                s_obs[team] = self.stack_padded_tensors_last_axis(team_obs, 0)
-        else:
-            if hasattr(self.unwrapped, "state"):
-                s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
-            else:
-                s_obs = [None]
-
-            if s_obs[0] != None:
-                s_obs = self.stack_padded_tensors_last_axis(s_obs, 0)
-            else:
-                s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for _ in self.unwrapped.agents])
+        for _, observation in _obs.items():
+            s_obs.append(observation)
         
-        return obs, s_obs, None
+        s_obs = torch.concat(s_obs, dim=-1)
+        
+        return _obs, s_obs, None
     
     def step_adversarial(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
         _actions = {}
@@ -752,22 +729,11 @@ class IsaacLabWrapper(object):
 
             return shared_obs
         
-        max_obs_key = None
-        max_shape = 0
-        for key, val in self.unwrapped.observation_spaces.items():
-            if val.shape[-1] > max_shape:
-                max_shape = val.shape[-1]
-                max_obs_key = key
-        
-        shape = self.unwrapped.observation_spaces[max_obs_key].shape[-1]*len(self.unwrapped.observation_spaces.items())
-        high = self.unwrapped.observation_spaces[max_obs_key].high.flatten()[-1]
-        low = self.unwrapped.observation_spaces[max_obs_key].low.flatten()[-1]
+        shape = 0
+        for _, val in self.unwrapped.observation_spaces.items():
+            shape += val.shape[-1]
 
-        if not hasattr(self.unwrapped, "state_space") or self.unwrapped.state_space.shape[0] == 0:
-            return {self._agent_map[k]: gymnasium.spaces.Box(low,high,(shape,)) for k in self.unwrapped.agents}
-        else:
-            return {self._agent_map[k]: self.unwrapped.state_space for k in self.unwrapped.agents}
-    
+        return {self._agent_map[k]: gymnasium.spaces.Box(-np.inf, np.inf, (shape,)) for k, _ in self.unwrapped.observation_spaces.items()}
 
 class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
 
