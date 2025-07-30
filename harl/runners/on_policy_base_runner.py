@@ -479,7 +479,7 @@ class OnPolicyBaseRunner:
 
         for agent_id, (_, agent_observation) in enumerate(obs.items()):
             self.actor_buffer[agent_id].insert(
-                agent_observation[:, agent_id],
+                agent_observation,
                 rnn_states[:, agent_id],
                 actions[:, agent_id],
                 action_log_probs[:, agent_id],
