@@ -224,30 +224,14 @@ class OnPolicyBaseRunner:
                         rnn_states_critic,
                     ) = self.collect(step)
                     # actions: (n_threads, n_agents, action_dim)
-                    if self.not_tensor:
-                        (
-                            obs,
-                            share_obs,
-                            rewards,
-                            dones,
-                            infos,
-                            available_actions,
-                        ) = self.env.step(actions.cpu().numpy())
-
-                        obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
-                        share_obs = torch.tensor(share_obs, dtype=torch.float32, device=self.device)
-                        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-                        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
-
-                    else:
-                        (
-                            obs,
-                            share_obs,
-                            rewards,
-                            dones,
-                            infos,
-                            available_actions,
-                        ) = self.env.step(actions)
+                    (
+                        obs,
+                        share_obs,
+                        rewards,
+                        dones,
+                        infos,
+                        available_actions,
+                    ) = self.env.step(actions)
                     
                     # obs: (n_threads, n_agents, obs_dim)
                     # share_obs: (n_threads, n_agents, share_obs_dim)
@@ -493,9 +477,9 @@ class OnPolicyBaseRunner:
                 ]
             )
 
-        for agent_id in range(self.num_agents):
+        for agent_id, (_, agent_observation) in enumerate(obs.items()):
             self.actor_buffer[agent_id].insert(
-                obs[:, agent_id],
+                agent_observation[:, agent_id],
                 rnn_states[:, agent_id],
                 actions[:, agent_id],
                 action_log_probs[:, agent_id],

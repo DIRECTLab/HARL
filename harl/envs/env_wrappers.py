@@ -458,27 +458,6 @@ class IsaacLabWrapper(object):
             return getattr(self.unwrapped, key)
         raise AttributeError(f"Wrapped environment ({self.unwrapped.__class__.__name__}) does not have attribute '{key}'")
     
-    def stack_padded_tensors_last_axis(self, tensors, padding_value=0):
-        # return torch.stack(tensors, axis=1)
-        """
-        Stacks a list of tensors with potentially different sizes by padding them to the maximum size.
-
-        Args:
-            tensors (list of torch.Tensor): List of tensors to stack.
-            padding_value (scalar, optional): Value to use for padding. Defaults to 0.
-
-        Returns:
-            torch.Tensor: Stacked tensor with padded dimensions.
-        """
-        max_size = max([tensor.shape[-1] for tensor in tensors])
-        padded_tensors = []
-        for tensor in tensors:
-            pad_diff = max_size - tensor.shape[-1]
-            padded_tensor = torch.nn.functional.pad(tensor, (0, pad_diff), 'constant', padding_value)
-            padded_tensors.append(padded_tensor)
-
-        return torch.stack(padded_tensors, -1).transpose(-1,-2)
-    
     def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         _obs, _ = self._env.reset()
 
@@ -488,8 +467,12 @@ class IsaacLabWrapper(object):
             s_obs.append(observation)
         
         s_obs = torch.concat(s_obs, dim=-1)
-        
-        return _obs, s_obs, None
+        s_obs_multi_agent = []
+        for _ in range(self.num_agents):
+            s_obs_multi_agent.append(s_obs)
+
+        s_obs_final = torch.stack(s_obs_multi_agent, dim=1)
+        return _obs, s_obs_final, None
     
     def step_adversarial(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
         _actions = {}
@@ -515,18 +498,6 @@ class IsaacLabWrapper(object):
             reward[team] = torch.stack(team_rewards)
 
         obs = self.stack_padded_tensors_last_axis(obs, 0)
-        # TODO: Fix state to handle adversarial envs
-        # if hasattr(self.unwrapped, "state"):
-        #     s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
-        # else:
-        #     s_obs = [None]
-
-        
-        # if s_obs[0] != None:
-        #     s_obs = self.stack_padded_tensors_last_axis(s_obs)
-        # else:
-        #     s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for agent in self.unwrapped.agents])
-
 
         terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
         truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
@@ -552,21 +523,19 @@ class IsaacLabWrapper(object):
 
         actions = {self._agent_map_inv[i]:actions[i][:,:self.action_space[i].shape[0]] for i in range(self.unwrapped.num_agents)}
 
-
         _obs, reward, terminated, truncated, info = self._env.step(actions)
 
-        obs = self.stack_padded_tensors_last_axis([_obs[agent] for agent in self.unwrapped.agents])
+        s_obs = []
 
-        if hasattr(self.unwrapped, "state"):
-            s_obs = [self.unwrapped.state() for _ in range(self.unwrapped.num_agents)]
-        else:
-            s_obs = [None]
-
+        for _, observation in _obs.items():
+            s_obs.append(observation)
         
-        if s_obs[0] != None:
-            s_obs = self.stack_padded_tensors_last_axis(s_obs)
-        else:
-            s_obs = self.stack_padded_tensors_last_axis([obs.clone().reshape((self.num_envs,-1)) for agent in self.unwrapped.agents])
+        s_obs = torch.concat(s_obs, dim=-1)
+        s_obs_multi_agent = []
+        for _ in range(self.num_agents):
+            s_obs_multi_agent.append(s_obs)
+
+        s_obs_final = torch.stack(s_obs_multi_agent, dim=1)
 
         reward = torch.stack([reward[agent] for agent in self.unwrapped.agents], axis=1)
         reward = reward.unsqueeze(-1)
@@ -575,7 +544,7 @@ class IsaacLabWrapper(object):
 
         dones = torch.logical_or(terminated, truncated)
 
-        return obs, s_obs, reward, dones, info, None
+        return _obs, s_obs_final, reward, dones, info, None
 
     def state(self) -> torch.Tensor:
         """Get the environment state
