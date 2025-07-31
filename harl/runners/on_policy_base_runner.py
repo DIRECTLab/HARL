@@ -835,22 +835,22 @@ class OnPolicyBaseRunner:
             # Load entire models
             for agent_id in range(self.num_agents):
                 actor_path = os.path.join(model_dir, f"actor_agent{agent_id}_full.pt")
-                loaded_actor = torch.load(actor_path, map_location="cpu")
+                loaded_actor = torch.load(actor_path, map_location=self.device)
                 self.actor[agent_id].actor = loaded_actor
 
             critic_path = os.path.join(model_dir, "critic_agent_full.pt")
             if os.path.exists(critic_path) and not self.algo_args["render"]["use_render"]:
-                self.critic.critic = torch.load(critic_path, map_location="cpu")
+                self.critic.critic = torch.load(critic_path, map_location=self.device)
 
                 if self.value_normalizer is not None:
                     normalizer_path = os.path.join(model_dir, "value_normalizer_full.pt")
                     if os.path.exists(normalizer_path):
-                        self.value_normalizer = torch.load(normalizer_path, map_location="cpu")
+                        self.value_normalizer = torch.load(normalizer_path, map_location=self.device)
         else:
             # Load only weights
             for agent_id in range(self.num_agents):
                 actor_path = os.path.join(model_dir, f"actor_agent{agent_id}.pt")
-                policy_actor_state_dict = torch.load(actor_path, map_location="cpu")
+                policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
                 self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
 
             if not self.algo_args["render"]["use_render"]:
