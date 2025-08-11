@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import gymnasium as gym
-from harl.envs.env_wrappers import IsaacLabWrapper, IsaacVideoWrapper
+from harl.envs.env_wrappers import IsaacLabWrapper, IsaacLabAdversarialWrapper, IsaacVideoWrapper
 import os
 
 
@@ -67,7 +67,10 @@ class IsaacLabEnv:
             }
             self.env = gym.wrappers.RecordVideo(self.env, **video_kwargs)
 
-        self.env = IsaacLabWrapper(self.env)
+        if hasattr(self.env.env.cfg, "teams"):
+            self.env =  IsaacLabAdversarialWrapper(self.env)
+        else:
+            self.env = IsaacLabWrapper(self.env)
 
         self.unwrapped = self.env.unwrapped
 

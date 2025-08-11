@@ -433,8 +433,6 @@ class IsaacLabWrapper(object):
 
         self._agent_map = {agent: i for i, agent in enumerate(self.unwrapped.agents)}
         self._agent_map_inv = {i: agent for i, agent in enumerate(self.unwrapped.agents)}
-        self.is_adversarial = hasattr(self.unwrapped.cfg, "teams")
-
         # device
         if hasattr(self.unwrapped, "device"):
             self._device = torch.device(self.unwrapped.device)
@@ -476,39 +474,6 @@ class IsaacLabWrapper(object):
         s_obs_final = torch.stack(s_obs_multi_agent, dim=1)
         return _obs, s_obs_final, None
     
-    def step_adversarial(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
-        _actions = {}
-        for team, agents in self.unwrapped.cfg.teams.items():
-            for agent in agents:
-                _actions[agent] = actions[self._agent_map[agent]][:,:self.action_space[team][agent].shape[0]]
-        _obs, _reward, terminated, truncated, info = self._env.step(_actions)
-
-        s_obs = {}
-        obs = []
-        reward = {}
-        for team in self.cfg.teams.keys():
-            team_rewards = []
-            team_obs = []
-            for agent_obs in _obs[team].values():
-                team_obs.append(agent_obs)
-                obs.append(agent_obs)
-
-            for agent_reward in _reward[team].values():
-                team_rewards.append(agent_reward)
-
-            s_obs[team] = self.stack_padded_tensors_last_axis(team_obs, 0)
-            reward[team] = torch.stack(team_rewards)
-
-        obs = self.stack_padded_tensors_last_axis(obs, 0)
-
-        terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
-        truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
-
-
-        dones = torch.logical_or(terminated, truncated)
-                
-        return obs, s_obs, reward, dones, info, None
-
     def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
         """Perform a step in the environment
 
@@ -520,9 +485,6 @@ class IsaacLabWrapper(object):
         :return: Observation, reward, terminated, truncated, info
         :rtype: tuple of dictionaries of torch.Tensor and any other info
         """
-        if self.is_adversarial:
-            return self.step_adversarial(actions)
-
         actions = {self._agent_map_inv[i]:actions[i][:,:self.action_space[i].shape[0]] for i in range(self.unwrapped.num_agents)}
 
         _obs, reward, terminated, truncated, info = self._env.step(actions)
@@ -648,71 +610,32 @@ class IsaacLabWrapper(object):
         """Observation spaces
         """
         obs = dict()
-        if self.is_adversarial:
-            for team, agents in self.unwrapped.cfg.teams.items():
-                obs[team] = dict()
-                for agent in agents:
-                    low = self.unwrapped.observation_spaces[agent].low.flatten()[-1]
-                    high = self.unwrapped.observation_spaces[agent].high.flatten()[-1]
-                    shape = (self.unwrapped.observation_spaces[agent].shape[-1],)
-                    obs[team][agent] = gymnasium.spaces.Box(low,high,shape) 
 
-            return obs
-        else:
-            for agent, val in self.unwrapped.observation_spaces.items():
-                if type(val) is gymnasium.spaces.Tuple:
-                    shape = []
-                    for v in val:
-                        shape.append(v.shape[-1])
-                    obs[self._agent_map[agent]] = gymnasium.spaces.Box(
-                        -np.inf, np.inf, shape
-                    )
-                else:
-                    obs[self._agent_map[agent]] = gymnasium.spaces.Box(
-                        -np.inf, np. inf, (val.shape[-1],)
-                    )
-            return obs
+        for agent, val in self.unwrapped.observation_spaces.items():
+            if type(val) is gymnasium.spaces.Tuple:
+                shape = []
+                for v in val:
+                    shape.append(v.shape[-1])
+                obs[self._agent_map[agent]] = gymnasium.spaces.Box(
+                    -np.inf, np.inf, shape
+                )
+            else:
+                obs[self._agent_map[agent]] = gymnasium.spaces.Box(
+                    -np.inf, np. inf, (val.shape[-1],)
+                )
+        return obs
 
     @property
     def action_space(self) -> Mapping[int, gym.Space]:
         """Action spaces
         """
-        if self.is_adversarial:
-            action_space = dict()
-            for team, agents in self.unwrapped.cfg.teams.items():
-                action_space[team] = dict()
-                for agent in agents:
-                    low = self.unwrapped.action_spaces[agent].low.flatten()[-1]
-                    high = self.unwrapped.action_spaces[agent].high.flatten()[-1]
-                    shape = (self.unwrapped.action_spaces[agent].shape[-1],)
-                    action_space[team][agent] = gymnasium.spaces.Box(low,high,shape) 
-
-            return action_space
-        return {self._agent_map[k]: gymnasium.spaces.Box(v.low.flatten()[-1],v.high.flatten()[-1],(v.shape[-1],)) for k, v in self.unwrapped.action_spaces.items()}
+        return {self._agent_map[k]: gymnasium.spaces.Box(v.low.flatten()[-1],v.high.flatten()[-1],\
+                                                         (v.shape[-1],)) for k, v in self.unwrapped.action_spaces.items()}
     
     @property
     def share_observation_space(self) -> Mapping[int, gym.Space]:
         """Share observation space
         """
-
-        # TODO: Update this so that the max shape is per agent per team, not all agents
-        if self.is_adversarial:
-            shared_obs = dict()
-            for team, agents in self.unwrapped.cfg.teams.items():
-                max_obs_key = None
-                max_shape = 0
-                for agent in agents:
-                    val = self.unwrapped.observation_spaces[agent]
-                    if val.shape[-1] > max_shape:
-                        max_shape = val.shape[-1]
-                        max_obs_key = agent
-
-                shape = self.unwrapped.observation_spaces[max_obs_key].shape[-1]*len(agents)
-                high = self.unwrapped.observation_spaces[max_obs_key].high.flatten()[-1]
-                low = self.unwrapped.observation_spaces[max_obs_key].low.flatten()[-1]
-                shared_obs[team] = gymnasium.spaces.Box(low, high, (shape,))
-
-            return shared_obs
         
         shape = 0
         for _, val in self.unwrapped.observation_spaces.items():
@@ -726,6 +649,256 @@ class IsaacLabWrapper(object):
                 shape += val.shape[-1]
 
         return {self._agent_map[k]: gymnasium.spaces.Box(-np.inf, np.inf, (shape,)) for k, _ in self.unwrapped.observation_spaces.items()}
+    
+
+class IsaacLabAdversarialWrapper(object):
+    def __init__(self, env: Any) -> None:
+        """Base wrapper class for multi-agent environments
+
+        :param env: The multi-agent environment to wrap
+        :type env: Any supported multi-agent environment
+        """
+        if not hasattr(env.unwrapped, "agents"):
+            self._env = SingleAgentIsaacLabWrapper(env)
+            self.unwrapped = self._env
+        else:
+            self._env = env
+            try:
+                self.unwrapped = self._env.unwrapped
+            except:
+                self.unwrapped = env
+
+        self._agent_map = {agent: i for i, agent in enumerate(self.unwrapped.agents)}
+        self._agent_map_inv = {i: agent for i, agent in enumerate(self.unwrapped.agents)}
+
+        # device
+        if hasattr(self.unwrapped, "device"):
+            self._device = torch.device(self.unwrapped.device)
+        else:
+            self._device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    def __getattr__(self, key: str) -> Any:
+        """Get an attribute from the wrapped environment
+
+        :param key: The attribute name
+        :type key: str
+
+        :raises AttributeError: If the attribute does not exist
+
+        :return: The attribute value
+        :rtype: Any
+        """
+        if hasattr(self._env, key):
+            return getattr(self._env, key)
+        if hasattr(self.unwrapped, key):
+            return getattr(self.unwrapped, key)
+        raise AttributeError(f"Wrapped environment ({self.unwrapped.__class__.__name__}) does not have attribute '{key}'")
+    
+    def reset(self) -> Tuple[torch.Tensor, torch.Tensor, Any]:
+        _obs, _ = self._env.reset()
+
+        s_obs = {}
+
+        for team, agents in _obs.items():
+            team_obs = []
+            for _, obs in agents.items():
+                if len(obs.shape) > 2:
+                    obs = obs.reshape(obs.shape[0], -1)
+                team_obs.append(obs)
+            team_obs = torch.concat(team_obs, dim=-1)
+            s_obs[team] = team_obs
+
+        return _obs, s_obs, None
+
+    def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Any]:
+        """Perform a step in the environment
+
+        :param actions: The actions to perform
+        :type actions: dictionary of torch.Tensor
+
+        :raises NotImplementedError: Not implemented
+
+        :return: Observation, reward, terminated, truncated, info
+        :rtype: tuple of dictionaries of torch.Tensor and any other info
+        """
+        _actions = {}
+
+        for i in range(self.num_agents):
+            agent_id = self._agent_map_inv[i]
+            _actions[agent_id] = actions[i,:,:]
+
+
+        _obs, reward, terminated, truncated, info = self._env.step(_actions)
+
+        s_obs = {}
+
+        for team, agents_obs in _obs.items():
+            s_obs[team] = []
+            for agent_id, agent_obs in agents_obs.items():
+                s_obs[team].append(agent_obs)
+
+            s_obs[team] = torch.concat(s_obs[team], dim=-1)
+
+        reward = {team: torch.sum(reward[team]) for team in reward.keys()}
+        
+        terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
+        truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
+
+        dones = torch.logical_or(terminated, truncated)
+
+        return _obs, s_obs, reward, dones, info, None
+
+    def state(self) -> torch.Tensor:
+        """Get the environment state
+
+        :raises NotImplementedError: Not implemented
+
+        :return: State
+        :rtype: torch.Tensor
+        """
+        raise NotImplementedError 
+
+    def render(self, *args, **kwargs) -> Any:
+        """Render the environment
+
+        :raises NotImplementedError: Not implemented
+
+        :return: Any value from the wrapped environment
+        :rtype: any
+        """
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Close the environment
+
+        :raises NotImplementedError: Not implemented
+        """
+        raise NotImplementedError
+
+    @property
+    def device(self) -> torch.device:
+        """The device used by the environment
+
+        If the wrapped environment does not have the ``device`` property, the value of this property
+        will be ``"cuda"`` or ``"cpu"`` depending on the device availability
+        """
+        return self._device
+
+    @property
+    def num_envs(self) -> int:
+        """Number of environments
+
+        If the wrapped environment does not have the ``num_envs`` property, it will be set to 1
+        """
+        return self.unwrapped.num_envs if hasattr(self.unwrapped, "num_envs") else 1
+
+    @property
+    def num_agents(self) -> int:
+        """Number of current agents
+
+        Read from the length of the ``agents`` property if the wrapped environment doesn't define it
+        """
+        try:
+            return self.unwrapped.num_agents
+        except:
+            return len(self.agents)
+
+    @property
+    def max_num_agents(self) -> int:
+        """Number of possible agents the environment could generate
+
+        Read from the length of the ``possible_agents`` property if the wrapped environment doesn't define it
+        """
+        try:
+            return self.unwrapped.max_num_agents
+        except:
+            return len(self.possible_agents)
+
+    @property
+    def agents(self) -> Sequence[str]:
+        """Names of all current agents
+
+        These may be changed as an environment progresses (i.e. agents can be added or removed)
+        """
+        return self.unwrapped.agents
+
+    @property
+    def possible_agents(self) -> Sequence[str]:
+        """Names of all possible agents the environment could generate
+
+        These can not be changed as an environment progresses
+        """
+        return self.unwrapped.possible_agents
+
+    # @property
+    # def state_spaces(self) -> Mapping[str, gym.Space]:
+    #     """State spaces
+
+    #     Since the state space is a global view of the environment (and therefore the same for all the agents),
+    #     this property returns a dictionary (for consistency with the other space-related properties) with the same
+    #     space for all the agents
+    #     """
+    #     space = self._unwrapped.state_space
+    #     return {agent: space for agent in self.possible_agents}
+
+    @property
+    def observation_space(self) -> Mapping[int, gym.Space]:
+        """Observation spaces
+        """
+        obs = dict()
+
+        for team, agents in self.unwrapped.cfg.teams.items():
+            obs[team] = dict()
+            for agent_id in agents:
+                agent_obs = self.unwrapped.observation_spaces[agent_id]
+                if type(agent_obs) is gymnasium.spaces.Tuple:
+                    shape = []
+                    for v in agent_obs:
+                        shape.append(v.shape[-1])
+                    obs[team][agent_id] = gymnasium.spaces.Box(
+                        -np.inf, np.inf, shape
+                    )
+                else:
+                    obs[team][agent_id] = gymnasium.spaces.Box(
+                        -np.inf, np. inf, (agent_obs.shape[-1],)
+                    )
+        return obs
+
+    @property
+    def action_space(self) -> Mapping[int, gym.Space]:
+        """Action spaces
+        """
+        action_space = dict()
+        for team, agents in self.unwrapped.cfg.teams.items():
+            action_space[team] = dict()
+            for agent in agents:
+                low = self.unwrapped.action_spaces[agent].low.flatten()[-1]
+                high = self.unwrapped.action_spaces[agent].high.flatten()[-1]
+                shape = (self.unwrapped.action_spaces[agent].shape[-1],)
+                action_space[team][agent] = gymnasium.spaces.Box(low,high,shape) 
+
+        return action_space
+    
+    @property
+    def share_observation_space(self) -> Mapping[int, gym.Space]:
+        """Share observation space
+        """
+        shared_obs = dict()
+        for team, agents in self.unwrapped.cfg.teams.items():
+            shape = 0
+            for agent_id in agents:
+                agent_shape = self.unwrapped.observation_spaces[agent_id]
+                if type(agent_shape) is gymnasium.spaces.Tuple:
+                    total_shape = 1
+                    for v in agent_shape:
+                        total_shape *= v.shape[-1]
+                    shape += total_shape
+                else:
+                    shape += agent_shape.shape[-1]
+
+            shared_obs[team] = gymnasium.spaces.Box(-np.inf, np.inf, (shape,))
+
+        return shared_obs
 
 class IsaacVideoWrapper(gymnasium.wrappers.RecordVideo):
 
