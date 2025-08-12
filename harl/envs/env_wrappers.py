@@ -739,10 +739,8 @@ class IsaacLabAdversarialWrapper(object):
 
             s_obs[team] = torch.concat(s_obs[team], dim=-1)
 
-        reward = {team: torch.sum(reward[team]) for team in reward.keys()}
-        
-        terminated = torch.stack([terminated[agent] for agent in self.unwrapped.agents], axis=1)
-        truncated = torch.stack([truncated[agent] for agent in self.unwrapped.agents], axis=1)
+        terminated = torch.stack([terminated[team] for team in self.unwrapped.cfg.teams.keys()], axis=1)
+        truncated = torch.stack([truncated[team] for team in self.unwrapped.cfg.teams.keys()], axis=1)
 
         dones = torch.logical_or(terminated, truncated)
 

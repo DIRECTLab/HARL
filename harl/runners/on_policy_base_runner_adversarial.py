@@ -233,31 +233,15 @@ class OnPolicyBaseRunnerAdversarial:
                         rnn_states,
                         rnn_states_critic,
                     ) = self.collect(step)
-                    # actions: (n_threads, n_agents, action_dim)
-                    if self.not_tensor:
-                        (
-                            obs,
-                            share_obs,
-                            rewards,
-                            dones,
-                            infos,
-                            available_actions,
-                        ) = self.env.step(actions.cpu().numpy())
 
-                        obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
-                        share_obs = torch.tensor(share_obs, dtype=torch.float32, device=self.device)
-                        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-                        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
-
-                    else:
-                        (
-                            obs,
-                            share_obs,
-                            rewards,
-                            dones,
-                            infos,
-                            available_actions,
-                        ) = self.env.step(actions)
+                    (
+                        obs,
+                        share_obs,
+                        rewards,
+                        dones,
+                        infos,
+                        available_actions,
+                    ) = self.env.step(actions)
                     
                     # obs: (n_threads, n_agents, obs_dim)
                     # share_obs: (n_threads, n_agents, share_obs_dim)
@@ -331,18 +315,11 @@ class OnPolicyBaseRunnerAdversarial:
         # reset env
         with torch.inference_mode():
             obs, share_obs, available_actions = self.env.reset()
-            #check if obs is already a torch tensor
-            if not isinstance(obs, torch.Tensor):
-                obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
-                share_obs = torch.tensor(share_obs, dtype=torch.float32, device=self.device)
-                self.not_tensor = True
-            else:
-                self.not_tensor = False
+
             # replay buffer
             for team, agents in self.env.unwrapped.cfg.teams.items():
                 for agent_id in agents:
-                    obs_space = self.env.observation_space[team][agent_id].shape[0]
-                    self.actor_buffers[team][agent_id].obs[0] = obs[:, self.env.env._agent_map[agent_id], :obs_space].clone()
+                    self.actor_buffers[team][agent_id].obs[0] = obs[team][agent_id].clone()
                     if self.actor_buffers[team][agent_id].available_actions is not None:
                         self.actor_buffers[team][agent_id].available_actions[0] = available_actions[
                             :, self.env.env._agent_map[agent_id]
@@ -350,7 +327,7 @@ class OnPolicyBaseRunnerAdversarial:
 
             if self.state_type == "EP":
                 for team, _ in self.critics.items():
-                    self.critic_buffers[team].share_obs[0] = share_obs[team][:, 0].clone()
+                    self.critic_buffers[team].share_obs[0] = share_obs[team].clone()
 
             elif self.state_type == "FP":
                 self.critic_buffer.share_obs[0] = share_obs.clone()
@@ -458,7 +435,7 @@ class OnPolicyBaseRunnerAdversarial:
         # If env is done, then reset rnn_state_critic to all zero
         if self.state_type == "EP":
             rnn_states_critic[dones_env == True] = torch.zeros(
-                ((dones_env == True).sum(), len(self.env.unwrapped.cfg.teams), self.recurrent_n, self.rnn_hidden_size_critic),
+                ((dones_env == True).sum(), self.recurrent_n, self.rnn_hidden_size_critic),
                 dtype=torch.float32, device=self.device
             )
         elif self.state_type == "FP":
@@ -475,23 +452,23 @@ class OnPolicyBaseRunnerAdversarial:
         # masks use 0 to mask out threads that just finish.
         # this is used for denoting at which point should rnn state be reset
         masks = torch.ones(
-            (self.algo_args["train"]["n_rollout_threads"], self.num_agents, 1),
+            (self.algo_args["train"]["n_rollout_threads"], 1),
             dtype=torch.float32, device=self.device
         )
         masks[dones_env == True] = torch.zeros(
-            ((dones_env == True).sum(), self.num_agents, 1), dtype=torch.float32, device=self.device
+            ((dones_env == True).sum(), 1), dtype=torch.float32, device=self.device
         )
 
         # active_masks use 0 to mask out agents that have died
         active_masks = torch.ones(
-            (self.algo_args["train"]["n_rollout_threads"], self.num_agents, 1),
+            (self.algo_args["train"]["n_rollout_threads"], 1),
             dtype=torch.float32, device=self.device
         )
-        active_masks[dones == True] = torch.zeros(
-            ((dones == True).sum(), 1), dtype=torch.float32, device=self.device
-        )
+        # active_masks[dones_env == True] = torch.zeros(
+        #     ((dones == True).sum(), 1), dtype=torch.float32, device=self.device
+        # )
         active_masks[dones_env == True] = torch.ones(
-            ((dones_env == True).sum(), self.num_agents, 1), dtype=torch.float32, device=self.device
+            ((dones_env == True).sum(), 1), dtype=torch.float32, device=self.device
         )
 
         # bad_masks use 0 to denote truncation and 1 to denote termination
@@ -523,12 +500,12 @@ class OnPolicyBaseRunnerAdversarial:
             for agent_id in agents:
                 agent_num = self.env.env._agent_map[agent_id]
                 self.actor_buffers[team][agent_id].insert(
-                    obs[:, agent_num],
+                    obs[team][agent_id],
                     rnn_states[:, agent_num],
                     actions[:, agent_num],
                     action_log_probs[:, agent_num],
-                    masks[:, agent_num],
-                    active_masks[:, agent_num],
+                    masks,
+                    active_masks,
                     available_actions[:, agent_num]
                     if available_actions[0] is not None
                     else None,
@@ -538,11 +515,11 @@ class OnPolicyBaseRunnerAdversarial:
         if self.state_type == "EP":
             for team, _ in self.env.unwrapped.cfg.teams.items():
                 self.critic_buffers[team].insert(
-                    share_obs[team][:, 0],
+                    share_obs[team],
                     rnn_states_critic[team],
                     values[team],
-                    rewards[team][:, 0],
-                    masks[:, 0],
+                    rewards[team].unsqueeze(-1),
+                    masks,
                     bad_masks,
                 )
         elif self.state_type == "FP":
