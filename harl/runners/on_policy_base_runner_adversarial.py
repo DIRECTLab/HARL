@@ -846,14 +846,15 @@ class OnPolicyBaseRunnerAdversarial:
 
     def restore(self):
         """Restore model parameters."""
-        for agent_id in range(self.num_agents):
-            policy_actor_state_dict = torch.load(
-                str(self.algo_args["train"]["model_dir"])
-                + "/actor_agent"
-                + str(agent_id)
-                + ".pt"
-            )
-            self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
+        for team, actors in self.actors.items():
+            for agent_id in actors.keys():
+                policy_actor_state_dict = torch.load(
+                    str(self.algo_args["train"]["model_dir"])
+                    + "/actor_agent_"
+                    + str(agent_id)
+                    + ".pt"
+                )
+                actors[agent_id].actor.load_state_dict(policy_actor_state_dict)
         if not self.algo_args["render"]["use_render"]:
             for team, critic in self.critics.items():
                 if os.path.exists(str(self.algo_args["train"]["model_dir"]) + f"/{team}_critic_agent" + ".pt"):
