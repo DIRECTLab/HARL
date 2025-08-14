@@ -88,6 +88,8 @@ class OnPolicyBaseRunnerAdversarial:
             )
             
         self.num_agents = get_num_agents(args["env"], env_args, self.env)
+        self.teams = self.env.unwrapped.cfg.teams
+        self.agent_map = self.env.env._agent_map
 
         print("share_observation_space: ", self.env.share_observation_space)
         print("observation_space: ", self.env.observation_space)
@@ -96,33 +98,35 @@ class OnPolicyBaseRunnerAdversarial:
         self.is_heter_action_space = True
         self.max_action_space = 0
 
-        for team, _ in self.env.unwrapped.cfg.teams.items():
+        for team, _ in self.teams.items():
             for _, val in self.env.action_space[team].items():
                 if val.shape[0] > self.max_action_space:
                     self.max_action_space =  val.shape[0] 
 
         # actor
         if self.share_param:
-            self.actor = []
-            agent = ALGO_REGISTRY[args["algo"]](
-                {**algo_args["model"], **algo_args["algo"]},
-                self.env.observation_space[0],
-                self.env.action_space[0],
-                device=self.device,
-            )
-            self.actor.append(agent)
-            for agent_id in range(1, self.num_agents):
-                assert (
-                    self.env.observation_space[agent_id]
-                    == self.env.observation_space[0]
-                ), "Agents have heterogeneous observation spaces, parameter sharing is not valid."
-                assert (
-                    self.env.action_space[agent_id] == self.env.action_space[0]
-                ), "Agents have heterogeneous action spaces, parameter sharing is not valid."
-                self.actor.append(self.actor[0])
+            #TODO: make this work with adversarial
+            pass
+            # self.actor = []
+            # agent = ALGO_REGISTRY[args["algo"]](
+            #     {**algo_args["model"], **algo_args["algo"]},
+            #     self.env.observation_space[0],
+            #     self.env.action_space[0],
+            #     device=self.device,
+            # )
+            # self.actor.append(agent)
+            # for agent_id in range(1, self.num_agents):
+            #     assert (
+            #         self.env.observation_space[agent_id]
+            #         == self.env.observation_space[0]
+            #     ), "Agents have heterogeneous observation spaces, parameter sharing is not valid."
+            #     assert (
+            #         self.env.action_space[agent_id] == self.env.action_space[0]
+            #     ), "Agents have heterogeneous action spaces, parameter sharing is not valid."
+            #     self.actor.append(self.actor[0])
         else:
             self.actors = {}
-            for team, agents in self.env.unwrapped.cfg.teams.items():
+            for team, agents in self.teams.items():
                 self.actors[team] = {}
                 for agent_id in agents:
                     agent = ALGO_REGISTRY[args["algo"]](
@@ -136,7 +140,7 @@ class OnPolicyBaseRunnerAdversarial:
         algo_args["model"]["hidden_sizes"] = self.hidden_sizes_critic
         if self.algo_args["render"]["use_render"] is False:  # train, not render
             self.actor_buffers = {}
-            for team, agents in self.env.unwrapped.cfg.teams.items():
+            for team, agents in self.teams.items():
                 self.actor_buffers[team] = {}
                 for agent_id in agents:
                     ac_bu = OnPolicyActorBuffer(
@@ -148,30 +152,34 @@ class OnPolicyBaseRunnerAdversarial:
 
             share_observation_space = self.env.share_observation_space
             
-            self.critics = {team : VCriticAdv(
-                {**algo_args["model"], **algo_args["algo"]},
-                share_observation_space[team],
-                device=self.device,
-            ) for team, _ in self.env.unwrapped.cfg.teams.items()}
+            self.critics = {}
+            for team in self.env.unwrapped.cfg.teams.keys():
+                self.critics[team] = VCriticAdv(
+                        {**algo_args["model"], **algo_args["algo"]},
+                        share_observation_space[team],
+                        device=self.device,
+                    )
 
             if self.state_type == "EP":
                 # EP stands for Environment Provided, as phrased by MAPPO paper.
                 # In EP, the global states for all agents are the same.
                 self.critic_buffers = {}
-                for team, _ in self.env.unwrapped.cfg.teams.items():
+                for team, _ in self.teams.items():
                     self.critic_buffers[team] = OnPolicyCriticBufferEP(
                         {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
                         share_observation_space[team],
                     )
 
             elif self.state_type == "FP":
+                pass
+                #TODO: get to work with adversarial
                 # FP stands for Feature Pruned, as phrased by MAPPO paper.
                 # In FP, the global states for all agents are different, and thus needs the dimension of the number of agents.
-                self.critic_buffer = OnPolicyCriticBufferFP(
-                    {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
-                    share_observation_space,
-                    self.num_agents,
-                )
+                # self.critic_buffer = OnPolicyCriticBufferFP(
+                #     {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
+                #     share_observation_space,
+                #     self.num_agents,
+                # )
             else:
                 raise NotImplementedError
 
@@ -213,8 +221,10 @@ class OnPolicyBaseRunnerAdversarial:
                 if self.share_param:
                     self.actor[0].lr_decay(episode, episodes)
                 else:
-                    for agent_id in range(self.num_agents):
-                        self.actor[agent_id].lr_decay(episode, episodes)
+                    for team, agents in self.teams.items():
+                        for agent in agents:
+                            self.actors[team][agent].lr_decay(episode, episodes)
+
                 # self.critic.lr_decay(episode, episodes)
                 for _, critic in self.critics.items():
                     critic.lr_decay(episode, episodes)
@@ -317,7 +327,7 @@ class OnPolicyBaseRunnerAdversarial:
             obs, share_obs, available_actions = self.env.reset()
 
             # replay buffer
-            for team, agents in self.env.unwrapped.cfg.teams.items():
+            for team, agents in self.teams.items():
                 for agent_id in agents:
                     self.actor_buffers[team][agent_id].obs[0] = obs[team][agent_id].clone()
                     if self.actor_buffers[team][agent_id].available_actions is not None:
@@ -344,7 +354,7 @@ class OnPolicyBaseRunnerAdversarial:
             action_collector = []
             action_log_prob_collector = []
             rnn_state_collector = []
-            for team, agents in self.env.unwrapped.cfg.teams.items():
+            for team, agents in self.teams.items():
                 for agent_id in agents:
                     action, action_log_prob, rnn_state = self.actors[team][agent_id].get_actions(
                         self.actor_buffers[team][agent_id].obs[step],
@@ -464,12 +474,6 @@ class OnPolicyBaseRunnerAdversarial:
             (self.algo_args["train"]["n_rollout_threads"], 1),
             dtype=torch.float32, device=self.device
         )
-        # active_masks[dones_env == True] = torch.zeros(
-        #     ((dones == True).sum(), 1), dtype=torch.float32, device=self.device
-        # )
-        active_masks[dones_env == True] = torch.ones(
-            ((dones_env == True).sum(), 1), dtype=torch.float32, device=self.device
-        )
 
         # bad_masks use 0 to denote truncation and 1 to denote termination
         if self.state_type == "EP":
@@ -496,9 +500,9 @@ class OnPolicyBaseRunnerAdversarial:
                 ]
             )
 
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team, agents in self.teams.items():
             for agent_id in agents:
-                agent_num = self.env.env._agent_map[agent_id]
+                agent_num = self.agent_map[agent_id]
                 self.actor_buffers[team][agent_id].insert(
                     obs[team][agent_id],
                     rnn_states[:, agent_num],
@@ -513,7 +517,7 @@ class OnPolicyBaseRunnerAdversarial:
 
         # TODO: Fix rnn states to handle adversarial case
         if self.state_type == "EP":
-            for team, _ in self.env.unwrapped.cfg.teams.items():
+            for team, _ in self.teams.items():
                 self.critic_buffers[team].insert(
                     share_obs[team],
                     rnn_states_critic[team],
@@ -523,9 +527,11 @@ class OnPolicyBaseRunnerAdversarial:
                     bad_masks,
                 )
         elif self.state_type == "FP":
-            self.critic_buffer.insert(
-                share_obs, rnn_states_critic, values, rewards, masks, bad_masks
-            )
+            pass
+            #TODO: Fix for adversarial case
+            # self.critic_buffer.insert(
+            #     share_obs, rnn_states_critic, values, rewards, masks, bad_masks
+            # )
 
     def compute(self):
         """Compute returns and advantages.
@@ -562,7 +568,7 @@ class OnPolicyBaseRunnerAdversarial:
         This will be used for then generating new actions.
         """
 
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team, agents in self.teams.items():
             for agent_id in agents:
                 self.actor_buffers[team][agent_id].after_update()
         
@@ -593,18 +599,20 @@ class OnPolicyBaseRunnerAdversarial:
 
         while True:
             eval_actions_collector = []
-            for agent_id in range(self.num_agents):
-                eval_actions, temp_rnn_state = self.actor[agent_id].act(
-                    eval_obs[:, agent_id],
-                    eval_rnn_states[:, agent_id],
-                    eval_masks[:, agent_id],
-                    eval_available_actions[:, agent_id]
-                    if eval_available_actions[0] is not None
-                    else None,
-                    deterministic=True,
-                )
-                eval_rnn_states[:, agent_id] = temp_rnn_state.cpu().numpy()
-                eval_actions_collector.append(eval_actions.cpu().numpy())
+            for team, agents in self.teams.items():
+                for agent_id in agents:
+                    agent_num = self.agent_map[agent_id]
+                    eval_actions, temp_rnn_state = self.actors[team][agent_id].act(
+                        eval_obs[:, agent_num],
+                        eval_rnn_states[:, agent_num],
+                        eval_masks[:, agent_num],
+                        eval_available_actions[:, agent_num]
+                        if eval_available_actions[0] is not None
+                        else None,
+                        deterministic=True,
+                    )
+                    eval_rnn_states[:, agent_num] = temp_rnn_state.cpu().numpy()
+                    eval_actions_collector.append(eval_actions.cpu().numpy())
 
             eval_actions = np.array(eval_actions_collector).transpose(1, 0, 2)
 
@@ -700,18 +708,20 @@ class OnPolicyBaseRunnerAdversarial:
                     rewards = 0
                     while step_count < 200:
                         eval_actions_collector = []
-                        for agent_id in range(self.num_agents):
-                            eval_actions, temp_rnn_state = self.actor[agent_id].act(
-                                eval_obs[:, agent_id],
-                                eval_rnn_states[:, agent_id],
-                                eval_masks[:, agent_id],
-                                eval_available_actions[:, agent_id]
-                                if eval_available_actions is not None
-                                else None,
-                                deterministic=True,
-                            )
-                            eval_rnn_states[:, agent_id] = temp_rnn_state.cpu().numpy()
-                            eval_actions_collector.append(eval_actions.cpu().numpy())
+                        for team, agents in self.teams.items():
+                            for agent_id in agents:
+                                agent_num = self.agent_map[agent_id]
+                                eval_actions, temp_rnn_state = self.actors[team][agent_id].act(
+                                    eval_obs[:, agent_num],
+                                    eval_rnn_states[:, agent_num],
+                                    eval_masks[:, agent_num],
+                                    eval_available_actions[:, agent_num]
+                                    if eval_available_actions is not None
+                                    else None,
+                                    deterministic=True,
+                                )
+                                eval_rnn_states[:, agent_num] = temp_rnn_state.cpu().numpy()
+                                eval_actions_collector.append(eval_actions.cpu().numpy())
                         eval_actions = np.array(eval_actions_collector).transpose(1, 0, 2)
                         (
                             eval_obs,
@@ -768,18 +778,20 @@ class OnPolicyBaseRunnerAdversarial:
                     rewards = 0
                     while True:
                         eval_actions_collector = []
-                        for agent_id in range(self.num_agents):
-                            eval_actions, temp_rnn_state = self.actor[agent_id].act(
-                                eval_obs[:, agent_id],
-                                eval_rnn_states[:, agent_id],
-                                eval_masks[:, agent_id],
-                                eval_available_actions[:, agent_id]
-                                if eval_available_actions[0] is not None
-                                else None,
-                                deterministic=True,
-                            )
-                            eval_rnn_states[:, agent_id] = temp_rnn_state
-                            eval_actions_collector.append(eval_actions)
+                        for team, agents in self.teams.items():
+                            for agent_id in agents:
+                                agent_num = self.agent_map[agent_id]
+                                eval_actions, temp_rnn_state = self.actors[team][agent_id].act(
+                                    eval_obs[:, agent_num],
+                                    eval_rnn_states[:, agent_num],
+                                    eval_masks[:, agent_num],
+                                    eval_available_actions[:, agent_num]
+                                    if eval_available_actions[0] is not None
+                                    else None,
+                                    deterministic=True,
+                                )
+                                eval_rnn_states[:, agent_num] = temp_rnn_state
+                                eval_actions_collector.append(eval_actions)
                         eval_actions = torch.tensor(eval_actions_collector).permute(1, 0, 2).contiguous()
                         (
                             eval_obs,
@@ -805,7 +817,7 @@ class OnPolicyBaseRunnerAdversarial:
 
     def prep_rollout(self):
         """Prepare for rollout."""
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team, agents in self.teams.items():
             for agent_id in agents:
                 self.actors[team][agent_id].prep_rollout()
 
@@ -814,7 +826,7 @@ class OnPolicyBaseRunnerAdversarial:
 
     def prep_training(self):
         """Prepare for training."""
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team, agents in self.teams.items():
             for agent_id in agents:
                 self.actors[team][agent_id].prep_training()
         for _, critic in self.critics.items():
@@ -825,7 +837,7 @@ class OnPolicyBaseRunnerAdversarial:
         if not os.path.exists(directory):
             os.mkdir(directory)
 
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team, agents in self.teams.items():
             for agent_id in agents:
                 policy_actor = self.actors[team][agent_id].actor
                 torch.save(

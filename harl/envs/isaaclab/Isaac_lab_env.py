@@ -67,10 +67,16 @@ class IsaacLabEnv:
             }
             self.env = gym.wrappers.RecordVideo(self.env, **video_kwargs)
 
-        if hasattr(self.env.env.cfg, "teams"):
-            self.env =  IsaacLabAdversarialWrapper(self.env)
+            if hasattr(self.env.env.env.cfg, "teams"):
+                self.env =  IsaacLabAdversarialWrapper(self.env)
+            else:
+                self.env = IsaacLabWrapper(self.env)
         else:
-            self.env = IsaacLabWrapper(self.env)
+            if hasattr(self.env.env.cfg, "teams"):
+                self.env =  IsaacLabAdversarialWrapper(self.env)
+            else:
+                self.env = IsaacLabWrapper(self.env)
+
 
         self.unwrapped = self.env.unwrapped
 

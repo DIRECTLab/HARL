@@ -24,28 +24,32 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
             dtype=torch.float32, device=self.device,
         )
 
+        advantages = {}
+
         for team, _ in self.critics.items():
             # compute advantages
             if self.value_normalizers is not None:
-                advantages = self.critic_buffers[team].returns[
+                advantages[team] = self.critic_buffers[team].returns[
                     :-1
                 ] - self.value_normalizers[team].denormalize(self.critic_buffers[team].value_preds[:-1])
             else:
-                advantages = (
+                advantages[team] = (
                     self.critic_buffers[team].returns[:-1] - self.critic_buffers[team].value_preds[:-1]
                 )
 
         # normalize advantages for FP
         if self.state_type == "FP":
-            active_masks_collector = [
-                self.actor_buffer[i].active_masks for i in range(self.num_agents)
-            ]
-            active_masks_array = torch.stack(active_masks_collector, axis=2)
-            advantages_copy = advantages.clone()
-            advantages_copy[active_masks_array[:-1] == 0.0] = torch.nan
-            mean_advantages = torch.nanmean(advantages_copy)
-            std_advantages = torch_nanstd(advantages_copy)
-            advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
+            #TODO: get to work with adversarial
+            pass
+            # active_masks_collector = [
+            #     self.actor_buffer[i].active_masks for i in range(self.num_agents)
+            # ]
+            # active_masks_array = torch.stack(active_masks_collector, axis=2)
+            # advantages_copy = advantages.clone()
+            # advantages_copy[active_masks_array[:-1] == 0.0] = torch.nan
+            # mean_advantages = torch.nanmean(advantages_copy)
+            # std_advantages = torch_nanstd(advantages_copy)
+            # advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
         for team, agents in self.env.unwrapped.cfg.teams.items():
             if not self.fixed_order:
@@ -88,11 +92,11 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
                 # update actor
                 if self.state_type == "EP":
                     actor_train_info = self.actors[team][agent_id].train(
-                        self.actor_buffers[team][agent_id], advantages.clone(), "EP"
+                        self.actor_buffers[team][agent_id], advantages[team].clone(), "EP"
                     )
                 elif self.state_type == "FP":
                     actor_train_info = self.actors[team][agent_id].train(
-                        self.actor_buffers[team][agent_id], advantages[:, :, agent_id].clone(), "FP"
+                        self.actor_buffers[team][agent_id], advantages[team][:, :, agent_id].clone(), "FP"
                     )
 
                 # compute action log probs for updated agent
