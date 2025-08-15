@@ -18,6 +18,7 @@ from harl.utils.models_tools import init_device
 from harl.envs import LOGGER_REGISTRY
 import os
 from pathlib import Path
+from gymnasium.spaces import Box
 
 
 class OnPolicyBaseRunnerAdversarial:
@@ -196,6 +197,19 @@ class OnPolicyBaseRunnerAdversarial:
         self.algo_args["model"]["hidden_sizes"] = self.hidden_sizes
         if self.algo_args["train"]["model_dir"] is not None:  # restore model
             self.restore()
+
+        if "prepend_actor" in self.algo_args and self.algo_args["prepend_actor"]: 
+            for agent_id, actor in self.actors.items():
+                new_actor = ALGO_REGISTRY[args["algo"]](
+                        {**algo_args["model"], **algo_args["algo"]},
+                        Box(-np.inf, np.inf, 3),
+                        Box(-np.inf, np.inf, 3),
+                        self.env.action_space[team][agent_id],
+                        device=self.device,
+                    )
+
+
+        
 
     def run(self):
         """Run the training (or rendering) pipeline."""
