@@ -88,9 +88,18 @@ class IsaacLabLogger(BaseLogger):
                 # Example: log to tensorboard as a scalar
                 self.writter.add_scalar(key, mean_val, self.total_num_steps)
 
-            print("==============================================")
-            print(
-            "Env {} Task {} Algo {} Exp {} episodes {}/{} total num timesteps {}/{}, FPS {}.".format(
+
+
+            # Clear the collected data after logging
+            self.other_data_log.clear()
+
+            self.writter.add_scalar("Total_Reward", self.total_reward, self.total_num_steps)
+
+            print("Total Reward is {}.".format(self.total_reward))
+        
+        print("==============================================")
+        print(
+        "Env {} Task {} Algo {} Exp {} episodes {}/{} total num timesteps {}/{}, FPS {}.".format(
                 self.args["env"],
                 self.task_name,
                 self.args["algo"],
@@ -102,13 +111,6 @@ class IsaacLabLogger(BaseLogger):
                 int(self.total_num_steps / (self.end - self.start)),
             )
         )
-
-            # Clear the collected data after logging
-            self.other_data_log.clear()
-
-            self.writter.add_scalar("Total_Reward", self.total_reward, self.total_num_steps)
-
-            print("Total Reward is {}.".format(self.total_reward))
         
         self.log_actor(actor_train_infos)
         if isinstance(critic_buffer, dict):
