@@ -41,11 +41,17 @@ class IsaacLabLogger(BaseLogger):
 
     def log_actor(self, actor_train_infos):
         """Log training information."""
-        # log actor
-        for agent_id in range(self.num_agents):
-            for k, v in actor_train_infos[agent_id].items():
-                agent_k = "agent%i/" % agent_id + k
-                self.writter.add_scalar(agent_k, v, self.total_num_steps)
+        if type(actor_train_infos) is dict:
+            for agent_id, infos in actor_train_infos.items():
+                for k, v in infos.items():
+                    agent_k = agent_id + "/" + k
+                    self.writter.add_scalar(agent_k, v, self.total_num_steps)
+        else:
+            # log actor
+            for agent_id in range(self.num_agents):
+                for k, v in actor_train_infos[agent_id].items():
+                    agent_k = "agent%i/" % agent_id + k
+                    self.writter.add_scalar(agent_k, v, self.total_num_steps)
 
     def log_critic(self, critic_train_info):
         """Log critic training information."""

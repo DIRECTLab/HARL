@@ -12,7 +12,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
 
     def train(self):
         """Train the model."""
-        actor_train_infos = []
+        actor_train_infos = {}
 
         # factor is used for considering updates made by previous agents
         factor = torch.ones(
@@ -132,7 +132,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
 
                 factor.detach_()
                 
-                actor_train_infos.append(actor_train_info)
+                actor_train_infos[agent_id] = actor_train_info
 
         critic_train_infos = {}
         # update critic

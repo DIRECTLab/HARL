@@ -61,6 +61,7 @@ class OnPolicyBaseRunnerAdversarial:
         setproctitle.setproctitle(
             str(args["algo"]) + "-" + str(args["env"]) + "-" + str(args["exp_name"])
         )
+        self.save_entire_model = algo_args["train"]["save_entire_model"] if "save_entire_model" in algo_args["train"] else False
         # set the config of env
         if self.algo_args["render"]["use_render"]:  # make envs for rendering
             (
@@ -851,53 +852,91 @@ class OnPolicyBaseRunnerAdversarial:
         if not os.path.exists(directory):
             os.mkdir(directory)
 
-        for team, agents in self.teams.items():
-            for agent_id in agents:
-                policy_actor = self.actors[team][agent_id].actor
+        if getattr(self, "save_entire_model", False):
+            for team, agents in self.teams.items():
+                for agent_id in agents:
+                    policy_actor = self.actors[team][agent_id].actor
+                    torch.save(
+                        policy_actor,
+                        str(directory) + "/actor_agent_" + str(agent_id) + "_full" + ".pt",
+                    )
+            
+            for team, critic in self.critics.items():
+                policy_critic = critic.critic
                 torch.save(
-                    policy_actor.state_dict(),
-                    str(directory) + "/actor_agent_" + str(agent_id) + ".pt",
+                    policy_critic, str(directory) + f"/{team}_critic_agent" + "_full" + ".pt"
                 )
-        
-        for team, critic in self.critics.items():
-            policy_critic = critic.critic
-            torch.save(
-                policy_critic.state_dict(), str(directory) + f"/{team}_critic_agent" + ".pt"
-            )
-            if self.value_normalizers is not None:
+                if self.value_normalizers is not None:
+                    torch.save(
+                        self.value_normalizers[team],
+                        str(directory) + f"/{team}_value_normalizer" + "_full" + ".pt",
+                    )
+
+        else:
+            for team, agents in self.teams.items():
+                for agent_id in agents:
+                    policy_actor = self.actors[team][agent_id].actor
+                    torch.save(
+                        policy_actor.state_dict(),
+                        str(directory) + "/actor_agent_" + str(agent_id) + ".pt",
+                    )
+            
+            for team, critic in self.critics.items():
+                policy_critic = critic.critic
                 torch.save(
-                    self.value_normalizers[team].state_dict(),
-                    str(directory) + f"/{team}_value_normalizer" + ".pt",
+                    policy_critic.state_dict(), str(directory) + f"/{team}_critic_agent" + ".pt"
                 )
+                if self.value_normalizers is not None:
+                    torch.save(
+                        self.value_normalizers[team].state_dict(),
+                        str(directory) + f"/{team}_value_normalizer" + ".pt",
+                    )
 
     def restore(self):
         """Restore model parameters."""
-        for team, actors in self.actors.items():
-            for agent_id in actors.keys():
-                policy_actor_state_dict = torch.load(
-                    str(self.algo_args["train"]["model_dir"])
-                    + "/actor_agent_"
-                    + str(agent_id)
-                    + ".pt"
-                )
-                actors[agent_id].actor.load_state_dict(policy_actor_state_dict)
-        if not self.algo_args["render"]["use_render"]:
-            for team, critic in self.critics.items():
-                if os.path.exists(str(self.algo_args["train"]["model_dir"]) + f"/{team}_critic_agent" + ".pt"):
-                    # restore critic
-                    policy_critic_state_dict = torch.load(
-                        str(self.algo_args["train"]["model_dir"])
-                        + f"/{team}_critic_agent"
-                        + ".pt"
-                    )
-                    critic.critic.load_state_dict(policy_critic_state_dict)
+        model_dir = str(self.algo_args["train"]["model_dir"])
+        if getattr(self, "save_entire_model", False):
+            # --- Restore full actor models ---
+            for team, actors in self.actors.items():
+                for agent_id in actors.keys():
+                    actor_path = f"{model_dir}/actor_agent_{agent_id}_full.pt"
+                    if os.path.exists(actor_path):
+                        self.actors[team][agent_id].actor = torch.load(actor_path)
+
+            if not self.algo_args["render"]["use_render"]:
+                # --- Restore full critic models ---
+                for team, critic in self.critics.items():
+                    critic_path = f"{model_dir}/{team}_critic_agent_full.pt"
+                    if os.path.exists(critic_path):
+                        self.critics[team].critic = torch.load(critic_path)
+
+                    # --- Restore full value normalizer ---
                     if self.value_normalizers is not None:
-                        value_normalizer_state_dict = torch.load(
-                            str(self.algo_args["train"]["model_dir"])
-                            + f"/{team}_value_normalizer"
-                            + ".pt"
-                        )
-                        self.value_normalizers[team].load_state_dict(value_normalizer_state_dict)
+                        value_norm_path = f"{model_dir}/{team}_value_normalizer_full.pt"
+                        if os.path.exists(value_norm_path):
+                            self.value_normalizers[team] = torch.load(value_norm_path)
+
+        else:
+            # --- Restore from state_dict ---
+            for team, actors in self.actors.items():
+                for agent_id in actors.keys():
+                    actor_path = f"{model_dir}/actor_agent_{agent_id}.pt"
+                    if os.path.exists(actor_path):
+                        state_dict = torch.load(actor_path)
+                        actors[agent_id].actor.load_state_dict(state_dict)
+
+            if not self.algo_args["render"]["use_render"]:
+                for team, critic in self.critics.items():
+                    critic_path = f"{model_dir}/{team}_critic_agent.pt"
+                    if os.path.exists(critic_path):
+                        state_dict = torch.load(critic_path)
+                        critic.critic.load_state_dict(state_dict)
+
+                    if self.value_normalizers is not None:
+                        value_norm_path = f"{model_dir}/{team}_value_normalizer.pt"
+                        if os.path.exists(value_norm_path):
+                            state_dict = torch.load(value_norm_path)
+                            self.value_normalizers[team].load_state_dict(state_dict)
 
     def close(self):
         """Close environment, writter, and logger."""
