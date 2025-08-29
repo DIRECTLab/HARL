@@ -723,10 +723,14 @@ class IsaacLabAdversarialWrapper(object):
         """
         _actions = {}
 
-        for i in range(self.num_agents):
-            agent_id = self._agent_map_inv[i]
-            _actions[agent_id] = actions[i,:,:]
-
+        robot_num = 0
+        for team, agents in self.action_space.items():
+            for agent_id, action_space in agents.items():
+                if actions[robot_num].shape[-1] > action_space.shape[-1]:
+                    _actions[agent_id] = actions[robot_num,:,:action_space.shape[-1]]
+                else:
+                    _actions[agent_id] = actions[robot_num]
+                robot_num += 1
 
         _obs, reward, terminated, truncated, info = self._env.step(_actions)
 
