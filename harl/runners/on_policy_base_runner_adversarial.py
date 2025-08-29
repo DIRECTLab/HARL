@@ -348,6 +348,14 @@ class OnPolicyBaseRunnerAdversarial:
                     self.eval()
                 self.save(self.save_dir)
 
+            if self.algo_args["train"].get("save_checkpoints"):
+                if episode % self.algo_args["train"]["checkpoint_interval"] == 0:
+                    root = os.path.join(self.save_dir, "checkpoints")
+                    os.makedirs(root, exist_ok=True)
+                    snapshot_dir = os.path.join(root, f"episode_{episode}")
+                    os.makedirs(snapshot_dir, exist_ok=True)
+                    self.save(snapshot_dir)
+
             self.after_update()
 
 
