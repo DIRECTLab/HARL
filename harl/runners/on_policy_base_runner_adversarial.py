@@ -221,9 +221,6 @@ class OnPolicyBaseRunnerAdversarial:
             // self.algo_args["train"]["n_rollout_threads"]
         )
 
-        # save initial model to compare with trained model
-        self.save(Path(self.save_dir, "initial_model"))
-
         self.logger.init(episodes)  # logger callback at the beginning of training
 
         for episode in range(1, episodes + 1):
@@ -349,7 +346,7 @@ class OnPolicyBaseRunnerAdversarial:
                 self.save(self.save_dir)
 
             if self.algo_args["train"].get("save_checkpoints"):
-                if episode % self.algo_args["train"]["checkpoint_interval"] == 0:
+                if episode == 1 or episode % self.algo_args["train"]["checkpoint_interval"] == 0:
                     root = os.path.join(self.save_dir, "checkpoints")
                     os.makedirs(root, exist_ok=True)
                     snapshot_dir = os.path.join(root, f"episode_{episode}")
