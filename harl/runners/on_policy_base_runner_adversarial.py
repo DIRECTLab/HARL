@@ -63,7 +63,7 @@ class OnPolicyBaseRunnerAdversarial:
         )
         self.save_entire_model = algo_args["train"]["save_entire_model"] if "save_entire_model" in algo_args["train"] else False
         self.training_mode = algo_args["algo"]["adversarial_training_mode"] if "adversarial_training_mode" in algo_args["algo"] else "parallel"
-        self.adversarial_training_iterations = algo_args["algo"]["adversarial_training_iterations"] if "adversarial_training_iterations" in algo_args["algo"] else 1_000_000
+        self.adversarial_training_iterations = algo_args["algo"]["adversarial_training_iterations"]
         # set the config of env
         if self.algo_args["render"]["use_render"]:  # make envs for rendering
             (
@@ -221,14 +221,15 @@ class OnPolicyBaseRunnerAdversarial:
             // self.algo_args["train"]["n_rollout_threads"]
         )
 
+        # save initial model to compare with trained model
+        self.save(Path(self.save_dir, "initial_model"))
 
         self.logger.init(episodes)  # logger callback at the beginning of training
 
         for episode in range(1, episodes + 1):
-
+            time_steps_completed = self.algo_args["train"]["episode_length"]\
+                    * self.algo_args["train"]["n_rollout_threads"]
             if self.training_mode != "parallel":
-                time_steps_completed = self.algo_args["train"]["episode_length"]\
-                      * self.algo_args["train"]["n_rollout_threads"]
                 self.current_team_train_steps += time_steps_completed
                 if self.current_team_train_steps >= self.adversarial_training_iterations:
                     if self.training_mode == "leapfrog":
@@ -326,7 +327,7 @@ class OnPolicyBaseRunnerAdversarial:
             self.prep_training()  # change to train mode
 
             actor_train_infos, critic_train_info = self.train()
-            
+
             # log information
             if episode % self.algo_args["train"]["log_interval"] == 0:
                 self.logger.episode_log(
@@ -335,8 +336,6 @@ class OnPolicyBaseRunnerAdversarial:
                     self.actor_buffers,
                     self.critic_buffers,
                 )
-
-
             
             if hasattr(self.logger,"total_reward") and self.logger.total_reward > self.best_avg_reward:
                 self.best_avg_reward = self.logger.total_reward
@@ -350,6 +349,7 @@ class OnPolicyBaseRunnerAdversarial:
                 self.save(self.save_dir)
 
             self.after_update()
+
 
     def warmup(self):
         """Warm up the replay buffer."""
