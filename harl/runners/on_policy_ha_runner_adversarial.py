@@ -26,7 +26,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
 
         advantages = {}
 
-        for team, _ in self.critics.items():
+        for team in self.training_teams:
             # compute advantages
             if self.value_normalizers is not None:
                 advantages[team] = self.critic_buffers[team].returns[
@@ -51,7 +51,8 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
             # std_advantages = torch_nanstd(advantages_copy)
             # advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team in self.training_teams:
+            agents = self.teams[team]
             if not self.fixed_order:
                 random.shuffle(agents)
 
@@ -136,7 +137,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
 
         critic_train_infos = {}
         # update critic
-        for team, _ in self.critics.items():
+        for team in self.team_names:
             critic_train_infos[team] = self.critics[team].train(self.critic_buffers[team], self.value_normalizers[team])
 
         return actor_train_infos, critic_train_infos

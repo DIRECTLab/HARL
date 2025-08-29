@@ -62,6 +62,8 @@ class OnPolicyBaseRunnerAdversarial:
             str(args["algo"]) + "-" + str(args["env"]) + "-" + str(args["exp_name"])
         )
         self.save_entire_model = algo_args["train"]["save_entire_model"] if "save_entire_model" in algo_args["train"] else False
+        self.training_mode = algo_args["algo"]["adversarial_training_mode"] if "adversarial_training_mode" in algo_args["algo"] else "parallel"
+        self.adversarial_training_iterations = algo_args["algo"]["adversarial_training_iterations"] if "adversarial_training_iterations" in algo_args["algo"] else 1_000_000
         # set the config of env
         if self.algo_args["render"]["use_render"]:  # make envs for rendering
             (
@@ -91,6 +93,11 @@ class OnPolicyBaseRunnerAdversarial:
             
         self.num_agents = get_num_agents(args["env"], env_args, self.env)
         self.teams = self.env.unwrapped.cfg.teams
+        self.team_names = list(self.teams.keys())
+        self.num_teams = len(self.team_names)
+        self.current_team_index = 0
+        self.current_team_train_steps = 0
+        self.training_teams = self.team_names if self.training_mode == "parallel" else [self.team_names[self.current_team_index]]
         self.agent_map = self.env.env._agent_map
 
         print("share_observation_space: ", self.env.share_observation_space)
@@ -199,19 +206,6 @@ class OnPolicyBaseRunnerAdversarial:
         if self.algo_args["train"]["model_dir"] is not None:  # restore model
             self.restore()
 
-        if "prepend_actor" in self.algo_args and self.algo_args["prepend_actor"]: 
-            for agent_id, actor in self.actors.items():
-                new_actor = ALGO_REGISTRY[args["algo"]](
-                        {**algo_args["model"], **algo_args["algo"]},
-                        Box(-np.inf, np.inf, 3),
-                        Box(-np.inf, np.inf, 3),
-                        self.env.action_space[team][agent_id],
-                        device=self.device,
-                    )
-
-
-        
-
     def run(self):
         """Run the training (or rendering) pipeline."""
         if self.algo_args["render"]["use_render"] is True:
@@ -227,16 +221,38 @@ class OnPolicyBaseRunnerAdversarial:
             // self.algo_args["train"]["n_rollout_threads"]
         )
 
+
         self.logger.init(episodes)  # logger callback at the beginning of training
 
         for episode in range(1, episodes + 1):
+
+            if self.training_mode != "parallel":
+                time_steps_completed = self.algo_args["train"]["episode_length"]\
+                      * self.algo_args["train"]["n_rollout_threads"]
+                self.current_team_train_steps += time_steps_completed
+                if self.current_team_train_steps >= self.adversarial_training_iterations:
+                    if self.training_mode == "leapfrog":
+                        self.current_team_index = (self.current_team_index + 1) % self.num_teams
+                        self.training_teams = [self.team_names[self.current_team_index]]
+                        self.current_team_train_steps = 0
+                    elif self.training_mode == "ladder":
+                        training_agents = self.teams[self.team_names[self.current_team_index]]
+                        for team, agents in self.actors.items():
+                            if team != self.team_names[self.current_team_index]:
+                                for idx, agent in enumerate(agents):
+                                    self.actors[team][agent].actor.load_state_dict(\
+                                        self.actors[self.team_names[self.current_team_index]]\
+                                            [training_agents[idx]].actor.state_dict())
+                                    
+
             if self.algo_args["train"][
                 "use_linear_lr_decay"
             ]:  # linear decay of learning rate
                 if self.share_param:
                     self.actor[0].lr_decay(episode, episodes)
                 else:
-                    for team, agents in self.teams.items():
+                    for team in self.team_names:
+                        agents = self.teams[team]
                         for agent in agents:
                             self.actors[team][agent].lr_decay(episode, episodes)
 
@@ -369,7 +385,8 @@ class OnPolicyBaseRunnerAdversarial:
             action_collector = []
             action_log_prob_collector = []
             rnn_state_collector = []
-            for team, agents in self.teams.items():
+            for team in self.team_names:
+                agents = self.teams[team]
                 for agent_id in agents:
                     action, action_log_prob, rnn_state = self.actors[team][agent_id].get_actions(
                         self.actor_buffers[team][agent_id].obs[step],
@@ -515,7 +532,8 @@ class OnPolicyBaseRunnerAdversarial:
                 ]
             )
 
-        for team, agents in self.teams.items():
+        for team in self.team_names:
+            agents = self.teams[team]
             for agent_id in agents:
                 agent_num = self.agent_map[agent_id]
                 self.actor_buffers[team][agent_id].insert(
@@ -553,7 +571,7 @@ class OnPolicyBaseRunnerAdversarial:
         Compute critic evaluation of the last state,
         and then let buffer compute returns, which will be used during training.
         """
-        for team, critic in self.critics.items():
+        for team in self.team_names:
             with torch.inference_mode():
                 if self.state_type == "EP":
                     next_value, _ = self.critics[team].get_values(
@@ -583,11 +601,10 @@ class OnPolicyBaseRunnerAdversarial:
         This will be used for then generating new actions.
         """
 
-        for team, agents in self.teams.items():
+        for team in self.team_names:
+            agents = self.teams[team]
             for agent_id in agents:
                 self.actor_buffers[team][agent_id].after_update()
-        
-        for team, _ in self.critics.items():
             self.critic_buffers[team].after_update()
 
     @torch.no_grad()
@@ -614,7 +631,8 @@ class OnPolicyBaseRunnerAdversarial:
 
         while True:
             eval_actions_collector = []
-            for team, agents in self.teams.items():
+            for team in self.team_names:
+                agents = self.teams[team]
                 for agent_id in agents:
                     agent_num = self.agent_map[agent_id]
                     eval_actions, temp_rnn_state = self.actors[team][agent_id].act(
