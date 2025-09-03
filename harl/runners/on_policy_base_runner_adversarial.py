@@ -232,7 +232,6 @@ class OnPolicyBaseRunnerAdversarial:
                     if self.training_mode == "leapfrog":
                         self.current_team_index = (self.current_team_index + 1) % self.num_teams
                         self.training_teams = [self.team_names[self.current_team_index]]
-                        self.current_team_train_steps = 0
                     elif self.training_mode == "ladder":
                         training_agents = self.teams[self.team_names[self.current_team_index]]
                         for team, agents in self.actors.items():
@@ -241,6 +240,9 @@ class OnPolicyBaseRunnerAdversarial:
                                     self.actors[team][agent].actor.load_state_dict(\
                                         self.actors[self.team_names[self.current_team_index]]\
                                             [training_agents[idx]].actor.state_dict())
+                                    
+                    self.current_team_train_steps = 0
+                    
                                     
 
             if self.algo_args["train"][
