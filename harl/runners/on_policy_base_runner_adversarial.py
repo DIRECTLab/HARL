@@ -509,10 +509,16 @@ class OnPolicyBaseRunnerAdversarial:
         )
 
         # active_masks use 0 to mask out agents that have died
-        active_masks = torch.ones(
-            (self.algo_args["train"]["n_rollout_threads"], 1),
-            dtype=torch.float32, device=self.device
-        )
+        agent_active_masks = None
+        for team in self.team_names:
+            agents = self.teams[team]
+            for agent_id in agents:
+                active_masks = torch.ones(
+                    (self.algo_args["train"]["n_rollout_threads"], 1),
+                    dtype=torch.float32, device=self.device
+                )
+        if hasattr(self.env.unwrapped, "agent_active_masks"):
+            agent_active_masks = self.env.unwrapped.agent_active_masks  # dict: {agent_id: [n_threads, 1]}
 
         # bad_masks use 0 to denote truncation and 1 to denote termination
         if self.state_type == "EP":
@@ -549,7 +555,7 @@ class OnPolicyBaseRunnerAdversarial:
                     actions[:, agent_num],
                     action_log_probs[:, agent_num],
                     masks,
-                    active_masks,
+                    agent_active_masks[team][agent_id] if agent_active_masks else active_masks,
                     available_actions[:, agent_num]
                     if available_actions[0] is not None
                     else None,
