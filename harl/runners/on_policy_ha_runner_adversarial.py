@@ -15,18 +15,21 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
         actor_train_infos = {}
 
         # factor is used for considering updates made by previous agents
-        factor = torch.ones(
-            (
-                self.algo_args["train"]["episode_length"],
-                self.algo_args["train"]["n_rollout_threads"],
-                1,
-            ),
-            dtype=torch.float32, device=self.device,
-        )
+        factor = {}
+
+
 
         advantages = {}
 
         for team in self.training_teams:
+            factor[team] = torch.ones(
+                (
+                    self.algo_args["train"]["episode_length"],
+                    self.algo_args["train"]["n_rollout_threads"],
+                    1,
+                ),
+                dtype=torch.float32, device=self.device,
+            )
             # compute advantages
             if self.value_normalizers is not None:
                 advantages[team] = self.critic_buffers[team].returns[
@@ -58,7 +61,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
 
             for agent_id in agents:
                 self.actor_buffers[team][agent_id].update_factor(
-                    factor
+                    factor[team]
                 )  # current actor save factor
 
                 # the following reshaping combines the first two dimensions (i.e. episode_length and n_rollout_threads) to form a batch
@@ -121,7 +124,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
                 )
 
                 # update factor for next agent
-                factor = factor * (
+                factor[team] = factor[team] * (
                     getattr(torch, self.action_aggregation)(
                         torch.exp(new_actions_logprob - old_actions_logprob), dim=-1
                     ).reshape(
@@ -131,7 +134,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
                     )
                 )
 
-                factor.detach_()
+                factor[team].detach_()
                 
                 actor_train_infos[agent_id] = actor_train_info
 
