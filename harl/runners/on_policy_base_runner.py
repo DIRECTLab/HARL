@@ -789,81 +789,82 @@ class OnPolicyBaseRunner:
 
     def save(self, directory):
         """Save model parameters or entire model based on self.save_entire_model."""
-        if not os.path.exists(directory):
-            os.mkdir(directory)
+        robot_ids = self.env.env.cfg.possible_agents
 
-        if getattr(self, "save_entire_model", False):
-            # Save entire models including class definitions
-            for agent_id in range(self.num_agents):
-                policy_actor = self.actor[agent_id].actor
+        for actor_idx, robot_id in enumerate(robot_ids):
+            if not os.path.exists(directory):
+                os.mkdir(directory)
+
+            if getattr(self, "save_entire_model", False):
+                # Save entire models including class definitions
+                policy_actor = self.actor[actor_idx].actor
                 torch.save(
                     policy_actor,
-                    os.path.join(directory, f"actor_agent{agent_id}_full.pt"),
+                    os.path.join(directory, f"actor_agent_{robot_id}_full.pt"),
                 )
-            torch.save(
-                self.critic.critic,
-                os.path.join(directory, "critic_agent_full.pt"),
-            )
-            if self.value_normalizer is not None:
                 torch.save(
-                    self.value_normalizer,
-                    os.path.join(directory, "value_normalizer_full.pt"),
+                    self.critic.critic,
+                    os.path.join(directory, "critic_agent_full.pt"),
                 )
-        else:
-            # Save only weights
-            for agent_id in range(self.num_agents):
-                policy_actor = self.actor[agent_id].actor
+                if self.value_normalizer is not None:
+                    torch.save(
+                        self.value_normalizer,
+                        os.path.join(directory, "value_normalizer_full.pt"),
+                    )
+            else:
+                # Save only weights
+                policy_actor = self.actor[actor_idx].actor
                 torch.save(
                     policy_actor.state_dict(),
-                    os.path.join(directory, f"actor_agent{agent_id}.pt"),
+                    os.path.join(directory, f"actor_agent_{robot_id}.pt"),
                 )
-            torch.save(
-                self.critic.critic.state_dict(),
-                os.path.join(directory, "critic_agent.pt"),
-            )
-            if self.value_normalizer is not None:
                 torch.save(
-                    self.value_normalizer.state_dict(),
-                    os.path.join(directory, "value_normalizer.pt"),
+                    self.critic.critic.state_dict(),
+                    os.path.join(directory, "critic_agent.pt"),
                 )
+                if self.value_normalizer is not None:
+                    torch.save(
+                        self.value_normalizer.state_dict(),
+                        os.path.join(directory, "value_normalizer.pt"),
+                    )
 
     def restore(self):
         """Restore model parameters or entire model based on self.save_entire_model."""
         model_dir = str(self.algo_args["train"]["model_dir"])
+        robot_ids = self.env.env.cfg.possible_agents
 
-        if getattr(self, "save_entire_model", False):
-            # Load entire models
-            for agent_id in range(self.num_agents):
-                actor_path = os.path.join(model_dir, f"actor_agent{agent_id}_full.pt")
+        for actor_idx, robot_id in enumerate(robot_ids):
+            if getattr(self, "save_entire_model", False):
+                # Load entire models
+                actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}_full.pt")
                 loaded_actor = torch.load(actor_path, map_location=self.device)
-                self.actor[agent_id].actor = loaded_actor
+                self.actor[actor_idx].actor = loaded_actor
 
-            critic_path = os.path.join(model_dir, "critic_agent_full.pt")
-            if os.path.exists(critic_path) and not self.algo_args["render"]["use_render"]:
-                self.critic.critic = torch.load(critic_path, map_location=self.device)
-
-                if self.value_normalizer is not None:
-                    normalizer_path = os.path.join(model_dir, "value_normalizer_full.pt")
-                    if os.path.exists(normalizer_path):
-                        self.value_normalizer = torch.load(normalizer_path, map_location=self.device)
-        else:
-            # Load only weights
-            for agent_id in range(self.num_agents):
-                actor_path = os.path.join(model_dir, f"actor_agent{agent_id}.pt")
-                policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
-                self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
-
-            if not self.algo_args["render"]["use_render"]:
-                critic_path = os.path.join(model_dir, "critic_agent.pt")
-                if os.path.exists(critic_path):
-                    policy_critic_state_dict = torch.load(critic_path, map_location="cpu")
-                    self.critic.critic.load_state_dict(policy_critic_state_dict)
+                critic_path = os.path.join(model_dir, "critic_agent_full.pt")
+                if os.path.exists(critic_path) and not self.algo_args["render"]["use_render"]:
+                    self.critic.critic = torch.load(critic_path, map_location=self.device)
 
                     if self.value_normalizer is not None:
-                        normalizer_path = os.path.join(model_dir, "value_normalizer.pt")
+                        normalizer_path = os.path.join(model_dir, "value_normalizer_full.pt")
                         if os.path.exists(normalizer_path):
-                            value_normalizer_state_dict = torch.load(normalizer_path, map_location="cpu")
-                            self.value_normalizer.load_state_dict(value_normalizer_state_dict)
+                            self.value_normalizer = torch.load(normalizer_path, map_location=self.device)
+            else:
+                # Load only weights
+                actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}.pt")
+                policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
+                self.actor[actor_idx].actor.load_state_dict(policy_actor_state_dict)
+
+                if not self.algo_args["render"]["use_render"]:
+                    critic_path = os.path.join(model_dir, "critic_agent.pt")
+                    if os.path.exists(critic_path):
+                        policy_critic_state_dict = torch.load(critic_path, map_location="cpu")
+                        self.critic.critic.load_state_dict(policy_critic_state_dict)
+
+                        if self.value_normalizer is not None:
+                            normalizer_path = os.path.join(model_dir, "value_normalizer.pt")
+                            if os.path.exists(normalizer_path):
+                                value_normalizer_state_dict = torch.load(normalizer_path, map_location="cpu")
+                                self.value_normalizer.load_state_dict(value_normalizer_state_dict)
 
 
     def close(self):
