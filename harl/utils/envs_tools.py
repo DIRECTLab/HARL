@@ -113,7 +113,7 @@ def make_train_env(env_name, seed, n_threads, env_args):
 
 def make_eval_env(env_name, seed, n_threads, env_args):
     """Make env for evaluation."""
-    if env_name == "dexhands" or env_name == "isaaclab":  # dexhands does not support running multiple instances
+    if env_name == "dexhands":  # dexhands does not support running multiple instances
         raise NotImplementedError
 
     def get_env_fn(rank):
