@@ -870,30 +870,36 @@ class OnPolicyBaseRunnerAdversarial:
     def restore(self):
         """Restore model parameters."""
         for agent_id in range(self.num_agents):
-            policy_actor_state_dict = torch.load(
-                str(self.algo_args["train"]["model_dir"])
-                + "/actor_agent"
-                + str(agent_id)
-                + ".pt"
-            )
-            self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
+            try:
+                policy_actor_state_dict = torch.load(
+                    str(self.algo_args["train"]["model_dir"])
+                    + "/actor_agent"
+                    + str(agent_id)
+                    + ".pt"
+                )
+                self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
+            except Exception as e:
+                print("\033[31m Couldnt load actor for robot, " + policy_actor_state_dict + e.message() + "\033[0m")
         if not self.algo_args["render"]["use_render"]:
             for team, critic in self.critics.items():
-                if os.path.exists(str(self.algo_args["train"]["model_dir"]) + f"/{team}_critic_agent" + ".pt"):
-                    # restore critic
-                    policy_critic_state_dict = torch.load(
-                        str(self.algo_args["train"]["model_dir"])
-                        + f"/{team}_critic_agent"
-                        + ".pt"
-                    )
-                    critic.critic.load_state_dict(policy_critic_state_dict)
-                    if self.value_normalizers is not None:
-                        value_normalizer_state_dict = torch.load(
+                try:
+                    if os.path.exists(str(self.algo_args["train"]["model_dir"]) + f"/{team}_critic_agent" + ".pt"):
+                        # restore critic
+                        policy_critic_state_dict = torch.load(
                             str(self.algo_args["train"]["model_dir"])
-                            + f"/{team}_value_normalizer"
+                            + f"/{team}_critic_agent"
                             + ".pt"
                         )
-                        self.value_normalizers[team].load_state_dict(value_normalizer_state_dict)
+                        critic.critic.load_state_dict(policy_critic_state_dict)
+                        if self.value_normalizers is not None:
+                            value_normalizer_state_dict = torch.load(
+                                str(self.algo_args["train"]["model_dir"])
+                                + f"/{team}_value_normalizer"
+                                + ".pt"
+                            )
+                            self.value_normalizers[team].load_state_dict(value_normalizer_state_dict)
+                except Exception as e:
+                    print("\033[31m Couldnt load critic, " + policy_critic_state_dict + e.message() + "\033[0m")
 
     def close(self):
         """Close environment, writter, and logger."""

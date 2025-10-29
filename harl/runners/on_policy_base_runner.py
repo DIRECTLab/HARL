@@ -833,8 +833,8 @@ class OnPolicyBaseRunner:
         model_dir = str(self.algo_args["train"]["model_dir"])
         robot_ids = self.env.env.cfg.possible_agents
 
-        try:
-            for actor_idx, robot_id in enumerate(robot_ids):
+        for actor_idx, robot_id in enumerate(robot_ids):
+            try:
                 if getattr(self, "save_entire_model", False):
                     # Load entire models
                     actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}_full.pt")
@@ -866,8 +866,8 @@ class OnPolicyBaseRunner:
                                     if os.path.exists(normalizer_path):
                                         value_normalizer_state_dict = torch.load(normalizer_path, map_location="cpu")
                                         self.value_normalizer.load_state_dict(value_normalizer_state_dict)
-        except Exception as e:
-            print("\033[31m Couldnt load model for robot, " + actor_path + e.message() + "\033[0m")
+            except Exception as e:
+                print("\033[31m Couldnt load model for robot, " + actor_path + e.message() + "\033[0m")
 
 
     def close(self):
