@@ -927,8 +927,7 @@ class OnPolicyBaseRunnerAdversarial:
                 for agent_id in actors.keys():
                     actor_path = os.path.join(model_dir, f"actor_agent_{agent_id}_full.pt")
                     try:
-                        if os.path.exists(actor_path):
-                            self.actors[team][agent_id].actor = torch.load(actor_path, map_location=self.device)
+                        self.actors[team][agent_id].actor = torch.load(actor_path, map_location=self.device)
                     except Exception as e:
                         print(
                             f"\033[31mCouldn’t load full actor for team={team}, agent={agent_id} "
@@ -940,8 +939,7 @@ class OnPolicyBaseRunnerAdversarial:
                 for team, critic in self.critics.items():
                     critic_path = os.path.join(model_dir, f"{team}_critic_agent_full.pt")
                     try:
-                        if os.path.exists(critic_path):
-                            self.critics[team].critic = torch.load(critic_path, map_location=self.device)
+                        self.critics[team].critic = torch.load(critic_path, map_location=self.device)
                     except Exception as e:
                         print(
                             f"\033[31mCouldn’t load full critic for team={team} "
@@ -952,8 +950,7 @@ class OnPolicyBaseRunnerAdversarial:
                     if self.value_normalizers is not None:
                         value_norm_path = os.path.join(model_dir, f"{team}_value_normalizer_full.pt")
                         try:
-                            if os.path.exists(value_norm_path):
-                                self.value_normalizers[team] = torch.load(value_norm_path, map_location=self.device)
+                            self.value_normalizers[team] = torch.load(value_norm_path, map_location=self.device)
                         except Exception as e:
                             print(
                                 f"\033[31mCouldn’t load full value normalizer for team={team} "
@@ -966,9 +963,8 @@ class OnPolicyBaseRunnerAdversarial:
                 for agent_id in actors.keys():
                     actor_path = os.path.join(model_dir, f"actor_agent_{agent_id}.pt")
                     try:
-                        if os.path.exists(actor_path):
-                            state_dict = torch.load(actor_path, map_location="cpu")
-                            actors[agent_id].actor.load_state_dict(state_dict)
+                        state_dict = torch.load(actor_path, map_location=self.device)
+                        actors[agent_id].actor.load_state_dict(state_dict)
                     except Exception as e:
                         print(
                             f"\033[31mCouldn’t load actor weights for team={team}, agent={agent_id} "
@@ -979,9 +975,8 @@ class OnPolicyBaseRunnerAdversarial:
                 for team, critic in self.critics.items():
                     critic_path = os.path.join(model_dir, f"{team}_critic_agent.pt")
                     try:
-                        if os.path.exists(critic_path):
-                            state_dict = torch.load(critic_path, map_location="cpu")
-                            critic.critic.load_state_dict(state_dict)
+                        state_dict = torch.load(critic_path, map_location=self.device)
+                        critic.critic.load_state_dict(state_dict)
                     except Exception as e:
                         print(
                             f"\033[31mCouldn’t load critic weights for team={team} "
@@ -991,9 +986,8 @@ class OnPolicyBaseRunnerAdversarial:
                     if self.value_normalizers is not None:
                         value_norm_path = os.path.join(model_dir, f"{team}_value_normalizer.pt")
                         try:
-                            if os.path.exists(value_norm_path):
-                                state_dict = torch.load(value_norm_path, map_location="cpu")
-                                self.value_normalizers[team].load_state_dict(state_dict)
+                            state_dict = torch.load(value_norm_path, map_location=self.device)
+                            self.value_normalizers[team].load_state_dict(state_dict)
                         except Exception as e:
                             print(
                                 f"\033[31mCouldn’t load value normalizer weights for team={team} "
