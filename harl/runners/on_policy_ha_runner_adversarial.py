@@ -12,48 +12,56 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
 
     def train(self):
         """Train the model."""
-        actor_train_infos = []
+        actor_train_infos = {}
 
         # factor is used for considering updates made by previous agents
-        factor = torch.ones(
-            (
-                self.algo_args["train"]["episode_length"],
-                self.algo_args["train"]["n_rollout_threads"],
-                1,
-            ),
-            dtype=torch.float32, device=self.device,
-        )
+        factor = {}
 
-        for team, _ in self.critics.items():
+
+
+        advantages = {}
+
+        for team in self.training_teams:
+            factor[team] = torch.ones(
+                (
+                    self.algo_args["train"]["episode_length"],
+                    self.algo_args["train"]["n_rollout_threads"],
+                    1,
+                ),
+                dtype=torch.float32, device=self.device,
+            )
             # compute advantages
             if self.value_normalizers is not None:
-                advantages = self.critic_buffers[team].returns[
+                advantages[team] = self.critic_buffers[team].returns[
                     :-1
                 ] - self.value_normalizers[team].denormalize(self.critic_buffers[team].value_preds[:-1])
             else:
-                advantages = (
+                advantages[team] = (
                     self.critic_buffers[team].returns[:-1] - self.critic_buffers[team].value_preds[:-1]
                 )
 
         # normalize advantages for FP
         if self.state_type == "FP":
-            active_masks_collector = [
-                self.actor_buffer[i].active_masks for i in range(self.num_agents)
-            ]
-            active_masks_array = torch.stack(active_masks_collector, axis=2)
-            advantages_copy = advantages.clone()
-            advantages_copy[active_masks_array[:-1] == 0.0] = torch.nan
-            mean_advantages = torch.nanmean(advantages_copy)
-            std_advantages = torch_nanstd(advantages_copy)
-            advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
+            #TODO: get to work with adversarial
+            pass
+            # active_masks_collector = [
+            #     self.actor_buffer[i].active_masks for i in range(self.num_agents)
+            # ]
+            # active_masks_array = torch.stack(active_masks_collector, axis=2)
+            # advantages_copy = advantages.clone()
+            # advantages_copy[active_masks_array[:-1] == 0.0] = torch.nan
+            # mean_advantages = torch.nanmean(advantages_copy)
+            # std_advantages = torch_nanstd(advantages_copy)
+            # advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
 
-        for team, agents in self.env.unwrapped.cfg.teams.items():
+        for team in self.training_teams:
+            agents = self.teams[team]
             if not self.fixed_order:
                 random.shuffle(agents)
 
             for agent_id in agents:
                 self.actor_buffers[team][agent_id].update_factor(
-                    factor
+                    factor[team]
                 )  # current actor save factor
 
                 # the following reshaping combines the first two dimensions (i.e. episode_length and n_rollout_threads) to form a batch
@@ -88,11 +96,11 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
                 # update actor
                 if self.state_type == "EP":
                     actor_train_info = self.actors[team][agent_id].train(
-                        self.actor_buffers[team][agent_id], advantages.clone(), "EP"
+                        self.actor_buffers[team][agent_id], advantages[team].clone(), "EP"
                     )
                 elif self.state_type == "FP":
                     actor_train_info = self.actors[team][agent_id].train(
-                        self.actor_buffers[team][agent_id], advantages[:, :, agent_id].clone(), "FP"
+                        self.actor_buffers[team][agent_id], advantages[team][:, :, agent_id].clone(), "FP"
                     )
 
                 # compute action log probs for updated agent
@@ -116,7 +124,7 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
                 )
 
                 # update factor for next agent
-                factor = factor * (
+                factor[team] = factor[team] * (
                     getattr(torch, self.action_aggregation)(
                         torch.exp(new_actions_logprob - old_actions_logprob), dim=-1
                     ).reshape(
@@ -126,13 +134,13 @@ class OnPolicyHARunnerAdversarial(OnPolicyBaseRunnerAdversarial):
                     )
                 )
 
-                factor.detach_()
+                factor[team].detach_()
                 
-                actor_train_infos.append(actor_train_info)
+                actor_train_infos[agent_id] = actor_train_info
 
         critic_train_infos = {}
         # update critic
-        for team, _ in self.critics.items():
+        for team in self.team_names:
             critic_train_infos[team] = self.critics[team].train(self.critic_buffers[team], self.value_normalizers[team])
 
         return actor_train_infos, critic_train_infos

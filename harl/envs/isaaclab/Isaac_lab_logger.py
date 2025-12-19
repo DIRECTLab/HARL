@@ -1,5 +1,6 @@
 import time
 import numpy as np
+import pprint
 from harl.common.base_logger import BaseLogger
 
 class IsaacLabLogger(BaseLogger):
@@ -13,6 +14,16 @@ class IsaacLabLogger(BaseLogger):
         # { "some_key": [value_step_1, value_step_2, ...], ... }
         self.other_data_log = {}
         self.total_reward = float("-inf")
+        config_file = self.run_dir + "/configs.log"
+        with open(config_file, "w") as f:
+            f.write("Args:\n")
+            pprint.pprint(self.args, stream=f, indent=4, width=80, sort_dicts=True)
+            f.write("\n\nAlgo Args:\n")
+            pprint.pprint(self.algo_args, stream=f, indent=4, width=80, sort_dicts=True)
+            f.write("\n\nEnv Args:\n")
+            pprint.pprint(self.env_args, stream=f, indent=4, width=80, sort_dicts=True)
+            
+
 
     def get_task_name(self):
         return self.env_args["task"]
@@ -41,11 +52,17 @@ class IsaacLabLogger(BaseLogger):
 
     def log_actor(self, actor_train_infos):
         """Log training information."""
-        # log actor
-        for agent_id in range(self.num_agents):
-            for k, v in actor_train_infos[agent_id].items():
-                agent_k = "agent%i/" % agent_id + k
-                self.writter.add_scalar(agent_k, v, self.total_num_steps)
+        if type(actor_train_infos) is dict:
+            for agent_id, infos in actor_train_infos.items():
+                for k, v in infos.items():
+                    agent_k = agent_id + "/" + k
+                    self.writter.add_scalar(agent_k, v, self.total_num_steps)
+        else:
+            # log actor
+            for agent_id in range(self.num_agents):
+                for k, v in actor_train_infos[agent_id].items():
+                    agent_k = "agent%i/" % agent_id + k
+                    self.writter.add_scalar(agent_k, v, self.total_num_steps)
 
     def log_critic(self, critic_train_info):
         """Log critic training information."""
@@ -88,9 +105,18 @@ class IsaacLabLogger(BaseLogger):
                 # Example: log to tensorboard as a scalar
                 self.writter.add_scalar(key, mean_val, self.total_num_steps)
 
-            print("==============================================")
-            print(
-            "Env {} Task {} Algo {} Exp {} episodes {}/{} total num timesteps {}/{}, FPS {}.".format(
+
+
+            # Clear the collected data after logging
+            self.other_data_log.clear()
+
+            self.writter.add_scalar("Total_Reward", self.total_reward, self.total_num_steps)
+
+            print("Total Reward is {}.".format(self.total_reward))
+        
+        print("==============================================")
+        print(
+        "Env {} Task {} Algo {} Exp {} episodes {}/{} total num timesteps {}/{}, FPS {}.".format(
                 self.args["env"],
                 self.task_name,
                 self.args["algo"],
@@ -102,13 +128,6 @@ class IsaacLabLogger(BaseLogger):
                 int(self.total_num_steps / (self.end - self.start)),
             )
         )
-
-            # Clear the collected data after logging
-            self.other_data_log.clear()
-
-            self.writter.add_scalar("Total_Reward", self.total_reward, self.total_num_steps)
-
-            print("Total Reward is {}.".format(self.total_reward))
         
         self.log_actor(actor_train_infos)
         if isinstance(critic_buffer, dict):
