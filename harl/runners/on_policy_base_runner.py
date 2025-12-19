@@ -837,56 +837,56 @@ class OnPolicyBaseRunner:
                     )
 
 
-    def restore(self):
-        """Restore model parameters or entire model based on self.save_entire_model."""
-        model_dir = str(self.algo_args["train"]["model_dir"])
-        robot_ids = self.env.env.cfg.possible_agents
+def restore(self):
+    """Restore model parameters or entire model based on self.save_entire_model."""
+    model_dir = str(self.algo_args["train"]["model_dir"])
+    robot_ids = self.env.env.cfg.possible_agents
 
-        for actor_idx, robot_id in enumerate(robot_ids):
-            if getattr(self, "save_entire_model", False):
-                # ---- Load entire models ----
-                try:
-                    actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}_full.pt")
-                    loaded_actor = torch.load(actor_path, map_location=self.device)
-                    self.actor[actor_idx].actor = loaded_actor
-                except Exception as e:
-                    print(f"\033[31mCouldn’t load full actor for robot {robot_id} at {actor_path}: {e}\033[0m")
+    for actor_idx, robot_id in enumerate(robot_ids):
+        if getattr(self, "save_entire_model", False):
+            # ---- Load entire models (map to self.device) ----
+            actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}_full.pt")
+            try:
+                loaded_actor = torch.load(actor_path, map_location=self.device)
+                self.actor[actor_idx].actor = loaded_actor
+            except Exception as e:
+                print(f"\033[31mCouldn’t load full actor for robot {robot_id} at {actor_path}: {e}\033[0m")
 
-                try:
-                    critic_path = os.path.join(model_dir, "critic_agent_full.pt")
-                    if os.path.exists(critic_path) and not self.algo_args["render"]["use_render"]:
-                        self.critic.critic = torch.load(critic_path, map_location=self.device)
+            critic_path = os.path.join(model_dir, "critic_agent_full.pt")
+            try:
+                if os.path.exists(critic_path) and not self.algo_args["render"]["use_render"]:
+                    self.critic.critic = torch.load(critic_path, map_location=self.device)
+
+                    if self.value_normalizer is not None:
+                        normalizer_path = os.path.join(model_dir, "value_normalizer_full.pt")
+                        if os.path.exists(normalizer_path):
+                            self.value_normalizer = torch.load(normalizer_path, map_location=self.device)
+            except Exception as e:
+                print(f"\033[31mCouldn’t load full critic at {critic_path}: {e}\033[0m")
+
+        else:
+            # ---- Load only weights (load state_dicts onto CPU) ----
+            actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}.pt")
+            try:
+                policy_actor_state_dict = torch.load(actor_path, map_location="cpu")
+                self.actor[actor_idx].actor.load_state_dict(policy_actor_state_dict)
+            except Exception as e:
+                print(f"\033[31mCouldn’t load actor weights for robot {robot_id} at {actor_path}: {e}\033[0m")
+
+            critic_path = os.path.join(model_dir, "critic_agent.pt")
+            try:
+                if not self.algo_args["render"]["use_render"]:
+                    if os.path.exists(critic_path):
+                        policy_critic_state_dict = torch.load(critic_path, map_location="cpu")
+                        self.critic.critic.load_state_dict(policy_critic_state_dict)
 
                         if self.value_normalizer is not None:
-                            normalizer_path = os.path.join(model_dir, "value_normalizer_full.pt")
+                            normalizer_path = os.path.join(model_dir, "value_normalizer.pt")
                             if os.path.exists(normalizer_path):
-                                self.value_normalizer = torch.load(normalizer_path, map_location=self.device)
-                except Exception as e:
-                    print(f"\033[31mCouldn’t load full critic at {critic_path}: {e}\033[0m")
-
-            else:
-                # ---- Load only weights ----
-                try:
-                    actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}.pt")
-                    policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
-                    self.actor[actor_idx].actor.load_state_dict(policy_actor_state_dict)
-                except Exception as e:
-                    print(f"\033[31mCouldn’t load actor weights for robot {robot_id} at {actor_path}: {e}\033[0m")
-
-                try:
-                    if not self.algo_args["render"]["use_render"]:
-                        critic_path = os.path.join(model_dir, "critic_agent.pt")
-                        if os.path.exists(critic_path):
-                            policy_critic_state_dict = torch.load(critic_path, map_location="cpu")
-                            self.critic.critic.load_state_dict(policy_critic_state_dict)
-
-                            if self.value_normalizer is not None:
-                                normalizer_path = os.path.join(model_dir, "value_normalizer.pt")
-                                if os.path.exists(normalizer_path):
-                                    value_normalizer_state_dict = torch.load(normalizer_path, map_location="cpu")
-                                    self.value_normalizer.load_state_dict(value_normalizer_state_dict)
-                except Exception as e:
-                    print(f"\033[31mCouldn’t load critic weights at {critic_path}: {e}\033[0m")
+                                value_normalizer_state_dict = torch.load(normalizer_path, map_location="cpu")
+                                self.value_normalizer.load_state_dict(value_normalizer_state_dict)
+            except Exception as e:
+                print(f"\033[31mCouldn’t load critic weights at {critic_path}: {e}\033[0m")
 
 
     def close(self):
