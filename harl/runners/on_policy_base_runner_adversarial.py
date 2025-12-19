@@ -875,7 +875,7 @@ class OnPolicyBaseRunnerAdversarial:
             actor_path = os.path.join(model_dir, f"actor_agent{agent_id}.pt")
             try:
                 policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
-                self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
+                self.actors[agent_id].actor.load_state_dict(policy_actor_state_dict)
             except Exception as e:
                 print(f"\033[31mCouldn’t load actor for agent {agent_id} at {actor_path}: {e}\033[0m")
 
