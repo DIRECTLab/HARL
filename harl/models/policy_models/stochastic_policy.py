@@ -3,10 +3,18 @@ import torch.nn as nn
 from harl.utils.envs_tools import check
 from harl.models.base.cnn import CNNBase
 from harl.models.base.mlp import MLPBase
+from harl.models.base.snn_mlp import SpikingMLPBase
+from harl.models.base.snn_memory import SpikingMemMLPBase
 from harl.models.base.rnn import RNNLayer
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
 
+NET_BASE_MAP = {
+    "mlp": MLPBase,
+    "snn": SpikingMLPBase,
+    "snn_memory": SpikingMemMLPBase,
+    "cnn": CNNBase,
+}
 
 class StochasticPolicy(nn.Module):
     """Stochastic policy model. Outputs actions given observations."""
@@ -31,7 +39,8 @@ class StochasticPolicy(nn.Module):
         self.tpdv = dict(dtype=torch.float32, device=device)
 
         obs_shape = get_shape_from_obs_space(obs_space)
-        base = CNNBase if len(obs_shape) == 3 else MLPBase
+        self.network_base = args.get("network_base", "mlp")
+        base = NET_BASE_MAP[self.network_base]
         self.base = base(args, obs_shape)
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
@@ -74,7 +83,10 @@ class StochasticPolicy(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
-        actor_features = self.base(obs)
+        if 'snn' in self.network_base:
+            actor_features = self.base(obs, num_envs=rnn_states.shape[0])
+        else:
+            actor_features = self.base(obs)
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -112,7 +124,10 @@ class StochasticPolicy(nn.Module):
         if active_masks is not None:
             active_masks = check(active_masks).to(**self.tpdv)
 
-        actor_features = self.base(obs)
+        if 'snn' in self.network_base:
+            actor_features = self.base(obs, num_envs=rnn_states.shape[0])
+        else:
+            actor_features = self.base(obs)
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
