@@ -96,6 +96,11 @@ class OnPolicyBaseRunner:
         self.is_heter_action_space = False
         self.max_action_space = 0
 
+        if hasattr(self.env.unwrapped.cfg, "teams"):
+            raise Exception("It looks like you are trying to run an adversarial environment with "+\
+                            "a cooperative algorithm which is not allowed, please retry with an adversial "+\
+                            "algorithm (i.e happo_adv instead of happo)") 
+
         first_act_space = self.env.action_space[0]
         for key, val in self.env.action_space.items():
             if val.shape[0] > self.max_action_space:
@@ -844,16 +849,16 @@ class OnPolicyBaseRunner:
 
         for actor_idx, robot_id in enumerate(robot_ids):
             if getattr(self, "save_entire_model", False):
-                # ---- Load entire models ----
+                # ---- Load entire models (map to self.device) ----
+                actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}_full.pt")
                 try:
-                    actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}_full.pt")
                     loaded_actor = torch.load(actor_path, map_location=self.device)
                     self.actor[actor_idx].actor = loaded_actor
                 except Exception as e:
                     print(f"\033[31mCouldn’t load full actor for robot {robot_id} at {actor_path}: {e}\033[0m")
 
+                critic_path = os.path.join(model_dir, "critic_agent_full.pt")
                 try:
-                    critic_path = os.path.join(model_dir, "critic_agent_full.pt")
                     if os.path.exists(critic_path) and not self.algo_args["render"]["use_render"]:
                         self.critic.critic = torch.load(critic_path, map_location=self.device)
 
@@ -865,17 +870,17 @@ class OnPolicyBaseRunner:
                     print(f"\033[31mCouldn’t load full critic at {critic_path}: {e}\033[0m")
 
             else:
-                # ---- Load only weights ----
+                # ---- Load only weights (load state_dicts onto CPU) ----
+                actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}.pt")
                 try:
-                    actor_path = os.path.join(model_dir, f"actor_agent_{robot_id}.pt")
-                    policy_actor_state_dict = torch.load(actor_path, map_location=self.device)
+                    policy_actor_state_dict = torch.load(actor_path, map_location="cpu")
                     self.actor[actor_idx].actor.load_state_dict(policy_actor_state_dict)
                 except Exception as e:
                     print(f"\033[31mCouldn’t load actor weights for robot {robot_id} at {actor_path}: {e}\033[0m")
 
+                critic_path = os.path.join(model_dir, "critic_agent.pt")
                 try:
                     if not self.algo_args["render"]["use_render"]:
-                        critic_path = os.path.join(model_dir, "critic_agent.pt")
                         if os.path.exists(critic_path):
                             policy_critic_state_dict = torch.load(critic_path, map_location="cpu")
                             self.critic.critic.load_state_dict(policy_critic_state_dict)

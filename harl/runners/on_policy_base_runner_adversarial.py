@@ -92,6 +92,13 @@ class OnPolicyBaseRunnerAdversarial:
             )
             
         self.num_agents = get_num_agents(args["env"], env_args, self.env)
+
+        if not hasattr(self.env.unwrapped.cfg, "teams"):
+            raise Exception("It looks like you are trying to run an cooperative environment with "+\
+                            "an adversarial algorithm which is not allowed, please retry with an cooperative "+\
+                            "algorithm (i.e happo instead of happo_adv)") 
+
+
         self.teams = self.env.unwrapped.cfg.teams
         self.team_names = list(self.teams.keys())
         self.num_teams = len(self.team_names)
@@ -918,32 +925,81 @@ class OnPolicyBaseRunnerAdversarial:
                     )
 
     def restore(self):
-        """Restore model parameters."""
-        for agent_id in range(self.num_agents):
-            policy_actor_state_dict = torch.load(
-                str(self.algo_args["train"]["model_dir"])
-                + "/actor_agent"
-                + str(agent_id)
-                + ".pt"
-            )
-            self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
-        if not self.algo_args["render"]["use_render"]:
-            for team, critic in self.critics.items():
-                if os.path.exists(str(self.algo_args["train"]["model_dir"]) + f"/{team}_critic_agent" + ".pt"):
-                    # restore critic
-                    policy_critic_state_dict = torch.load(
-                        str(self.algo_args["train"]["model_dir"])
-                        + f"/{team}_critic_agent"
-                        + ".pt"
-                    )
-                    critic.critic.load_state_dict(policy_critic_state_dict)
-                    if self.value_normalizers is not None:
-                        value_normalizer_state_dict = torch.load(
-                            str(self.algo_args["train"]["model_dir"])
-                            + f"/{team}_value_normalizer"
-                            + ".pt"
+        """Restore model parameters or entire model based on self.save_entire_model."""
+        model_dir = str(self.algo_args["train"]["model_dir"])
+
+        if getattr(self, "save_entire_model", False):
+            # --- Restore full actor models (map to self.device) ---
+            for team, actors in self.actors.items():
+                for agent_id in actors.keys():
+                    actor_path = os.path.join(model_dir, f"actor_agent_{agent_id}_full.pt")
+                    try:
+                        self.actors[team][agent_id].actor = torch.load(actor_path, map_location=self.device)
+                    except Exception as e:
+                        print(
+                            f"\033[31mCouldn’t load full actor for team={team}, agent={agent_id} "
+                            f"at {actor_path}: {e}\033[0m"
                         )
-                        self.value_normalizers[team].load_state_dict(value_normalizer_state_dict)
+
+            if not self.algo_args["render"]["use_render"]:
+                # --- Restore full critic models (map to self.device) ---
+                for team, critic in self.critics.items():
+                    critic_path = os.path.join(model_dir, f"{team}_critic_agent_full.pt")
+                    try:
+                        self.critics[team].critic = torch.load(critic_path, map_location=self.device)
+                    except Exception as e:
+                        print(
+                            f"\033[31mCouldn’t load full critic for team={team} "
+                            f"at {critic_path}: {e}\033[0m"
+                        )
+
+                    # --- Restore full value normalizer (map to self.device) ---
+                    if self.value_normalizers is not None:
+                        value_norm_path = os.path.join(model_dir, f"{team}_value_normalizer_full.pt")
+                        try:
+                            self.value_normalizers[team] = torch.load(value_norm_path, map_location=self.device)
+                        except Exception as e:
+                            print(
+                                f"\033[31mCouldn’t load full value normalizer for team={team} "
+                                f"at {value_norm_path}: {e}\033[0m"
+                            )
+
+        else:
+            # --- Restore from state_dict (load dicts onto CPU) ---
+            for team, actors in self.actors.items():
+                for agent_id in actors.keys():
+                    actor_path = os.path.join(model_dir, f"actor_agent_{agent_id}.pt")
+                    try:
+                        state_dict = torch.load(actor_path, map_location=self.device)
+                        actors[agent_id].actor.load_state_dict(state_dict)
+                    except Exception as e:
+                        print(
+                            f"\033[31mCouldn’t load actor weights for team={team}, agent={agent_id} "
+                            f"at {actor_path}: {e}\033[0m"
+                        )
+
+            if not self.algo_args["render"]["use_render"]:
+                for team, critic in self.critics.items():
+                    critic_path = os.path.join(model_dir, f"{team}_critic_agent.pt")
+                    try:
+                        state_dict = torch.load(critic_path, map_location=self.device)
+                        critic.critic.load_state_dict(state_dict)
+                    except Exception as e:
+                        print(
+                            f"\033[31mCouldn’t load critic weights for team={team} "
+                            f"at {critic_path}: {e}\033[0m"
+                        )
+
+                    if self.value_normalizers is not None:
+                        value_norm_path = os.path.join(model_dir, f"{team}_value_normalizer.pt")
+                        try:
+                            state_dict = torch.load(value_norm_path, map_location=self.device)
+                            self.value_normalizers[team].load_state_dict(state_dict)
+                        except Exception as e:
+                            print(
+                                f"\033[31mCouldn’t load value normalizer weights for team={team} "
+                                f"at {value_norm_path}: {e}\033[0m"
+                            )
 
     def close(self):
         """Close environment, writter, and logger."""
