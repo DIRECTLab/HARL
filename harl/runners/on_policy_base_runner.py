@@ -96,6 +96,11 @@ class OnPolicyBaseRunner:
         self.is_heter_action_space = False
         self.max_action_space = 0
 
+        if hasattr(self.env.unwrapped.cfg, "teams"):
+            raise Exception("It looks like you are trying to run an adversarial environment with "+\
+                            "a cooperative algorithm which is not allowed, please retry with an adversial "+\
+                            "algorithm (i.e happo_adv instead of happo)") 
+
         first_act_space = self.env.action_space[0]
         for key, val in self.env.action_space.items():
             if val.shape[0] > self.max_action_space:

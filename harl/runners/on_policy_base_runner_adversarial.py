@@ -92,6 +92,13 @@ class OnPolicyBaseRunnerAdversarial:
             )
             
         self.num_agents = get_num_agents(args["env"], env_args, self.env)
+
+        if not hasattr(self.env.unwrapped.cfg, "teams"):
+            raise Exception("It looks like you are trying to run an cooperative environment with "+\
+                            "an adversarial algorithm which is not allowed, please retry with an cooperative "+\
+                            "algorithm (i.e happo instead of happo_adv)") 
+
+
         self.teams = self.env.unwrapped.cfg.teams
         self.team_names = list(self.teams.keys())
         self.num_teams = len(self.team_names)
