@@ -1,6 +1,6 @@
 import time
+import json
 import numpy as np
-import pprint
 from harl.common.base_logger import BaseLogger
 
 class IsaacLabLogger(BaseLogger):
@@ -14,14 +14,14 @@ class IsaacLabLogger(BaseLogger):
         # { "some_key": [value_step_1, value_step_2, ...], ... }
         self.other_data_log = {}
         self.total_reward = float("-inf")
-        config_file = self.run_dir + "/configs.log"
+        config_file = self.run_dir + "/configs.json"
+        config_data = {
+            "Args": self.args,
+            "Algo Args": self.algo_args,
+            "Env Args": self.env_args
+        }
         with open(config_file, "w") as f:
-            f.write("Args:\n")
-            pprint.pprint(self.args, stream=f, indent=4, width=80, sort_dicts=True)
-            f.write("\n\nAlgo Args:\n")
-            pprint.pprint(self.algo_args, stream=f, indent=4, width=80, sort_dicts=True)
-            f.write("\n\nEnv Args:\n")
-            pprint.pprint(self.env_args, stream=f, indent=4, width=80, sort_dicts=True)
+            json.dump(config_data, f, indent=4)
             
 
 
