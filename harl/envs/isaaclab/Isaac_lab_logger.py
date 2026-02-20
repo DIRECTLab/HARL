@@ -3,6 +3,27 @@ import json
 import numpy as np
 from harl.common.base_logger import BaseLogger
 
+
+def make_json_serializable(obj):
+    """
+    Recursively convert non-JSON-serializable objects to strings.
+    Handles dicts, lists, and primitive types.
+    """
+    if isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        # For non-serializable objects, convert to string representation
+        return str(obj)
+
+
 class IsaacLabLogger(BaseLogger):
     aver_episode_rewards = None
 
@@ -20,6 +41,8 @@ class IsaacLabLogger(BaseLogger):
             "Algo Args": self.algo_args,
             "Env Args": self.env_args
         }
+        # Convert non-serializable objects to strings before JSON dumping
+        config_data = make_json_serializable(config_data)
         with open(config_file, "w") as f:
             json.dump(config_data, f, indent=4)
             
