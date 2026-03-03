@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="harl",
-    version="1.0.0",
+    use_scm_version=True,
     author="PKU-MARL",
     description="PyTorch implementation of HARL Algorithms",
     url="https://github.com/PKU-MARL/HARL",
