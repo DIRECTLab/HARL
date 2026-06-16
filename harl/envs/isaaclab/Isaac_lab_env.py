@@ -59,8 +59,9 @@ class IsaacLabEnv:
         self.env = gym.make(env_args['task'], cfg=env_args['config'], render_mode="rgb_array", **env_args)
         
         if env_args['video_settings']['video']:
+            run_type = "play" if env_args['is_play'] else "train"
             video_kwargs = {
-                "video_folder": os.path.join(env_args['video_settings']['log_dir'], "train"),
+                "video_folder": os.path.join(env_args['video_settings']['log_dir'], run_type),
                 "step_trigger": lambda step: step % env_args['video_settings']['video_interval'] == 0,
                 "video_length": env_args['video_settings']['video_length'],
                 "disable_logger": True,
