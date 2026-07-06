@@ -489,6 +489,9 @@ class IsaacLabWrapper(object):
 
         _obs, reward, terminated, truncated, info = self._env.step(actions)
 
+        states = self.env.state() # This is the privileged state for the critic (and q_critic)
+                                  # Shape: (num_envs, num_states)
+        
         s_obs = []
 
         for _, observation in _obs.items():

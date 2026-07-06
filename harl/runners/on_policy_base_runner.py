@@ -3,6 +3,7 @@
 import time
 import numpy as np
 import torch
+import gymnasium
 import setproctitle
 from harl.common.valuenorm import ValueNorm
 from harl.common.buffers.on_policy_actor_buffer import OnPolicyActorBuffer
@@ -10,8 +11,13 @@ from harl.common.buffers.on_policy_critic_buffer_ep import OnPolicyCriticBufferE
 from harl.common.buffers.on_policy_critic_buffer_fp import OnPolicyCriticBufferFP
 from harl.algorithms.actors import ALGO_REGISTRY
 from harl.algorithms.critics.v_critic import VCritic
+from harl.algorithms.critics.rosa_q_critic import RosaQCritic
+from harl.common.buffers.on_policy_rosa_critic_buffer_ep import OnPolicyRosaCriticBufferEP
 from harl.utils.trans_tools import _t2n
-from harl.utils.envs_tools import set_seed, get_num_agents, make_render_env, make_eval_env, make_train_env 
+from harl.utils.envs_tools import (
+    set_seed, get_num_agents, make_render_env, make_eval_env, make_train_env,
+    get_shape_from_obs_space,
+)
 from harl.utils.configs_tools import init_dir, save_config, get_task_name
 from harl.utils.models_tools import init_device
 from harl.envs import LOGGER_REGISTRY
@@ -88,6 +94,7 @@ class OnPolicyBaseRunner:
             )
             
         self.num_agents = get_num_agents(args["env"], env_args, self.env)
+        self.use_rosa = False  # may be overridden below when not rendering
 
         print("share_observation_space: ", self.env.share_observation_space)
         print("observation_space: ", self.env.observation_space)
@@ -149,10 +156,30 @@ class OnPolicyBaseRunner:
                 self.actor_buffer.append(ac_bu)
 
             share_observation_space = self.env.share_observation_space[0]
-            
+
+            # ----------------------------------------------------------
+            # ROSA: early obs-space augmentation for the V-critic.
+            # V(s, r) concatenates the reward-function parameter vector to
+            # the centralized observation so the value estimate is conditioned
+            # on the current reward function.  We detect this before the
+            # critic/buffer are constructed so they allocate the right size.
+            # ----------------------------------------------------------
+            _use_rosa = bool(algo_args["algo"].get("use_rosa", False))
+            if _use_rosa:
+                self.reward_dim = self.env.unwrapped.cfg.reward_dim
+                _plain_obs_dim = get_shape_from_obs_space(share_observation_space)[0]
+                effective_share_obs_space = gymnasium.spaces.Box(
+                    low=-np.inf, high=np.inf,
+                    shape=(_plain_obs_dim + self.reward_dim,),
+                    dtype=np.float32,
+                )
+            else:
+                self.reward_dim = 0
+                effective_share_obs_space = share_observation_space
+
             self.critic = VCritic(
                 {**algo_args["model"], **algo_args["algo"]},
-                share_observation_space,
+                effective_share_obs_space,
                 device=self.device,
             )
 
@@ -161,14 +188,14 @@ class OnPolicyBaseRunner:
                 # In EP, the global states for all agents are the same.
                 self.critic_buffer = OnPolicyCriticBufferEP(
                     {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
-                    share_observation_space,
+                    effective_share_obs_space,
                 )
             elif self.state_type == "FP":
                 # FP stands for Feature Pruned, as phrased by MAPPO paper.
                 # In FP, the global states for all agents are different, and thus needs the dimension of the number of agents.
                 self.critic_buffer = OnPolicyCriticBufferFP(
                     {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
-                    share_observation_space,
+                    effective_share_obs_space,
                     self.num_agents,
                 )
             else:
@@ -178,7 +205,37 @@ class OnPolicyBaseRunner:
                 self.value_normalizer = ValueNorm(1, device=self.device)
             else:
                 self.value_normalizer = None
-            
+
+            # ----------------------------------------------------------
+            # ROSA: reward-conditioned Q-critic.
+            # use_rosa and reward_dim were already detected above for the
+            # V-critic obs-space augmentation.  Here we build the Q-critic
+            # and its dedicated buffer.  The Q-critic uses the plain
+            # (non-augmented) share_obs_space because it takes obs and
+            # reward_vec as separate inputs and concatenates them itself.
+            # ----------------------------------------------------------
+            self.use_rosa = _use_rosa
+            if self.use_rosa:
+                self.n_rosa_actions = int(algo_args["algo"].get("n_rosa_actions", 8))
+                act_spaces = list(self.env.action_space.values())
+
+                self.rosa_q_critic = RosaQCritic(
+                    {**algo_args["model"], **algo_args["algo"]},
+                    share_observation_space,   # plain obs, not augmented
+                    act_spaces,
+                    self.reward_dim,
+                    device=self.device,
+                )
+
+                # joint_act_dim: all agents' (possibly padded) actions flattened
+                joint_act_dim = self.num_agents * self.max_action_space
+                self.rosa_critic_buffer = OnPolicyRosaCriticBufferEP(
+                    {**algo_args["train"], **algo_args["model"], **algo_args["algo"]},
+                    share_observation_space,   # plain obs
+                    self.reward_dim,
+                    joint_act_dim,
+                )
+
             self.logger = LOGGER_REGISTRY[args["env"]](
                 args, algo_args, env_args, self.num_agents, self.writter, self.run_dir
             )
@@ -227,6 +284,7 @@ class OnPolicyBaseRunner:
                         action_log_probs,
                         rnn_states,
                         rnn_states_critic,
+                        reward_vec,   # Tensor (n_threads, reward_dim) or None
                     ) = self.collect(step)
                     # actions: (n_threads, n_agents, action_dim)
                     (
@@ -237,7 +295,7 @@ class OnPolicyBaseRunner:
                         infos,
                         available_actions,
                     ) = self.env.step(actions)
-                    
+
                     # obs: (n_threads, n_agents, obs_dim)
                     # share_obs: (n_threads, n_agents, share_obs_dim)
                     # rewards: (n_threads, n_agents, 1)
@@ -256,6 +314,7 @@ class OnPolicyBaseRunner:
                         action_log_probs,
                         rnn_states,
                         rnn_states_critic,
+                        reward_vec,   # None when use_rosa=False; insert() handles both
                     )
                     if hasattr(self.env, "log_info"):
                         self.logger.per_step(self.env.log_info)  # logger callback at each step
@@ -327,56 +386,149 @@ class OnPolicyBaseRunner:
                 ].clone()
 
         if self.state_type == "EP":
-            self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
+            if self.use_rosa:
+                # V-critic sees obs ∥ reward_vec; fetch the initial reward vec
+                # before any step so position 0 is correctly primed.
+                initial_reward_vec = self.env.unwrapped.state().to(self.device)  # (n_threads, reward_dim)
+                self.critic_buffer.share_obs[0] = torch.cat(
+                    [share_obs[:, 0], initial_reward_vec], dim=-1
+                )
+                # Q-critic buffer stores plain obs and reward_vecs separately
+                self.rosa_critic_buffer.share_obs[0] = share_obs[:, 0].clone()
+                self.rosa_critic_buffer.reward_vecs[0] = initial_reward_vec
+            else:
+                self.critic_buffer.share_obs[0] = share_obs[:, 0].clone()
         elif self.state_type == "FP":
             self.critic_buffer.share_obs[0] = share_obs.clone()
 
     def collect(self, step):
         """Collect actions and values from actors and critics.
+
+        When ROSA is active (``use_rosa=True``), the actor is sampled
+        ``n_rosa_actions`` times per environment thread; the joint action
+        that scores highest under the reward-conditioned Q-critic is used as
+        the executed action.  The reward-function parameter vector returned by
+        ``env.state()`` is also captured here (before ``env.step()``) and
+        returned so the runner can thread it through to the buffer.
+
         Args:
-            step: step in the episode.
+            step: current step index within the episode.
         Returns:
-            values, actions, action_log_probs, rnn_states, rnn_states_critic
+            values, actions, action_log_probs, rnn_states, rnn_states_critic,
+            reward_vec  (None when use_rosa=False).
         """
-        # collect actions, action_log_probs, rnn_states from n actors
         with torch.inference_mode():
-            action_collector = []
-            action_log_prob_collector = []
-            rnn_state_collector = []
-            for agent_id in range(self.num_agents):
-                action, action_log_prob, rnn_state = self.actor[agent_id].get_actions(
-                    self.actor_buffer[agent_id].obs[step],
-                    self.actor_buffer[agent_id].rnn_states[step],
-                    self.actor_buffer[agent_id].masks[step],
-                    self.actor_buffer[agent_id].available_actions[step]
-                    if self.actor_buffer[agent_id].available_actions is not None
-                    else None,
-                )
-                action_collector.append(action)
-                action_log_prob_collector.append(action_log_prob)
-                rnn_state_collector.append(rnn_state)
-            # (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
+            n_threads = self.algo_args["train"]["n_rollout_threads"]
 
-            if self.is_heter_action_space:
-                for i in range(len(action_collector)):
-                    pad_diff = self.max_action_space - action_collector[i].shape[1]
-                    if pad_diff > 0:
-                        action_collector[i] = torch.nn.functional.pad(action_collector[i], pad=(0, pad_diff), mode="constant", value=0)
-                        action_log_prob_collector[i] = torch.nn.functional.pad(action_log_prob_collector[i], pad=(0, pad_diff), mode="constant", value=0)
-            
-            actions = torch.stack(action_collector).permute(1, 0, 2).contiguous()
-            # actions = torch.tensor(action_collector).permute(1, 0, 2)
-            action_log_probs = torch.stack(action_log_prob_collector).permute(1, 0, 2).contiguous()
-            rnn_states = torch.stack(rnn_state_collector).permute(1, 0, 2, 3).contiguous()
+            # ----------------------------------------------------------
+            # Helper: sample one complete set of joint actions
+            # Returns per-agent lists (before stacking).
+            # ----------------------------------------------------------
+            def _sample_joint_actions():
+                act_list, lp_list, rnn_list = [], [], []
+                for agent_id in range(self.num_agents):
+                    avail = (
+                        self.actor_buffer[agent_id].available_actions[step]
+                        if self.actor_buffer[agent_id].available_actions is not None
+                        else None
+                    )
+                    a, lp, rs = self.actor[agent_id].get_actions(
+                        self.actor_buffer[agent_id].obs[step],
+                        self.actor_buffer[agent_id].rnn_states[step],
+                        self.actor_buffer[agent_id].masks[step],
+                        avail,
+                    )
+                    act_list.append(a)
+                    lp_list.append(lp)
+                    rnn_list.append(rs)
 
-            # collect values, rnn_states_critic from 1 critic
+                # Pad heterogeneous action spaces to max_action_space
+                if self.is_heter_action_space:
+                    for i in range(len(act_list)):
+                        pad_diff = self.max_action_space - act_list[i].shape[1]
+                        if pad_diff > 0:
+                            act_list[i] = torch.nn.functional.pad(
+                                act_list[i], pad=(0, pad_diff), mode="constant", value=0
+                            )
+                            lp_list[i] = torch.nn.functional.pad(
+                                lp_list[i], pad=(0, pad_diff), mode="constant", value=0
+                            )
+
+                # Stack agents: (n_agents, n_threads, dim) → (n_threads, n_agents, dim)
+                actions_t = torch.stack(act_list).permute(1, 0, 2).contiguous()
+                log_probs_t = torch.stack(lp_list).permute(1, 0, 2).contiguous()
+                rnn_states_t = torch.stack(rnn_list).permute(1, 0, 2, 3).contiguous()
+                return actions_t, log_probs_t, rnn_states_t
+
+            # ----------------------------------------------------------
+            # ROSA path: sample N candidates, score with Q-critic, pick best
+            # ----------------------------------------------------------
+            reward_vec = None
+            if self.use_rosa:
+                reward_vec = self.env.unwrapped.state().to(self.device)  # (n_threads, reward_dim)
+                # Use the plain (non-augmented) obs from the Q-critic's buffer.
+                # critic_buffer.share_obs already has reward_vec appended for the
+                # V-critic; passing it here would double-count the reward_vec.
+                share_obs_step = self.rosa_critic_buffer.share_obs[step]  # (n_threads, obs_dim)
+
+                cand_actions, cand_log_probs, cand_rnn_states = [], [], []
+                for _ in range(self.n_rosa_actions):
+                    a_t, lp_t, rs_t = _sample_joint_actions()
+                    cand_actions.append(a_t)
+                    cand_log_probs.append(lp_t)
+                    cand_rnn_states.append(rs_t)
+
+                # Score all N candidates: Q(s, joint_a_k, r) → (n_threads, 1) each
+                act_dim_padded = cand_actions[0].shape[-1]  # max_action_space
+                q_scores = torch.stack(
+                    [
+                        self.rosa_q_critic.get_q_values(
+                            share_obs_step,
+                            cand_actions[k].reshape(n_threads, -1),  # flatten agents
+                            reward_vec,
+                        )
+                        for k in range(self.n_rosa_actions)
+                    ],
+                    dim=0,
+                )  # (N, n_threads, 1)
+
+                # Per-thread argmax over the N candidates → (n_threads,)
+                best_k = q_scores.squeeze(-1).T.argmax(dim=-1)  # (n_threads,)
+
+                # Gather best action / log_prob / rnn_state per thread
+                # stacked shape: (N, n_threads, n_agents, dim)
+                stacked_actions = torch.stack(cand_actions, dim=0)
+                stacked_log_probs = torch.stack(cand_log_probs, dim=0)
+                stacked_rnn_states = torch.stack(cand_rnn_states, dim=0)
+
+                # Permute to (n_threads, N, ...) for gather on dim=1
+                def _gather_best(stacked, best_k):
+                    # stacked: (N, n_threads, *extra_dims)
+                    perm = stacked.permute(1, 0, *range(2, stacked.dim()))
+                    # perm: (n_threads, N, *extra_dims)
+                    idx = best_k.view(n_threads, *([1] * (stacked.dim() - 1)))
+                    idx = idx.expand(n_threads, 1, *perm.shape[2:])
+                    return perm.gather(1, idx).squeeze(1)
+
+                actions = _gather_best(stacked_actions, best_k)
+                action_log_probs = _gather_best(stacked_log_probs, best_k)
+                rnn_states = _gather_best(stacked_rnn_states, best_k)
+
+            else:
+                # ----------------------------------------------------------
+                # Standard path: single sample from each actor
+                # ----------------------------------------------------------
+                actions, action_log_probs, rnn_states = _sample_joint_actions()
+
+            # ----------------------------------------------------------
+            # Collect V-critic values (unchanged regardless of ROSA)
+            # ----------------------------------------------------------
             if self.state_type == "EP":
                 value, rnn_state_critic = self.critic.get_values(
                     self.critic_buffer.share_obs[step],
                     self.critic_buffer.rnn_states_critic[step],
                     self.critic_buffer.masks[step],
                 )
-                # (n_threads, dim)
                 values = value
                 rnn_states_critic = rnn_state_critic
             elif self.state_type == "FP":
@@ -384,33 +536,32 @@ class OnPolicyBaseRunner:
                     torch.concatenate(self.critic_buffer.share_obs[step]),
                     torch.concatenate(self.critic_buffer.rnn_states_critic[step]),
                     torch.concatenate(self.critic_buffer.masks[step]),
-                )  # concatenate (n_threads, n_agents, dim) into (n_threads * n_agents, dim)
-                # split (n_threads * n_agents, dim) into (n_threads, n_agents, dim)
+                )
                 values = torch.tensor(
                     torch.split(value), self.algo_args["train"]["n_rollout_threads"]
                 )
                 rnn_states_critic = torch.tensor(
-                    torch.split(
-                        rnn_state_critic), self.algo_args["train"]["n_rollout_threads"]
-                    
+                    torch.split(rnn_state_critic),
+                    self.algo_args["train"]["n_rollout_threads"],
                 )
 
-        return values, actions, action_log_probs, rnn_states, rnn_states_critic
+        return values, actions, action_log_probs, rnn_states, rnn_states_critic, reward_vec
 
     def insert(self, data):
         """Insert data into buffer."""
         (
-            obs,  # (n_threads, n_agents, obs_dim)
-            share_obs,  # (n_threads, n_agents, share_obs_dim)
-            rewards,  # (n_threads, n_agents, 1)
-            dones,  # (n_threads, n_agents)
-            infos,  # type: list, shape: (n_threads, n_agents)
-            available_actions,  # (n_threads, ) of None or (n_threads, n_agents, action_number)
-            values,  # EP: (n_threads, dim), FP: (n_threads, n_agents, dim)
-            actions,  # (n_threads, n_agents, action_dim)
-            action_log_probs,  # (n_threads, n_agents, action_dim)
-            rnn_states,  # (n_threads, n_agents, dim)
-            rnn_states_critic,  # EP: (n_threads, dim), FP: (n_threads, n_agents, dim)
+            obs,              # (n_threads, n_agents, obs_dim)
+            share_obs,        # (n_threads, n_agents, share_obs_dim)
+            rewards,          # (n_threads, n_agents, 1)
+            dones,            # (n_threads, n_agents)
+            infos,            # type: list, shape: (n_threads, n_agents)
+            available_actions,# (n_threads,) of None or (n_threads, n_agents, action_number)
+            values,           # EP: (n_threads, dim), FP: (n_threads, n_agents, dim)
+            actions,          # (n_threads, n_agents, action_dim)
+            action_log_probs, # (n_threads, n_agents, action_dim)
+            rnn_states,       # (n_threads, n_agents, dim)
+            rnn_states_critic,# EP: (n_threads, dim), FP: (n_threads, n_agents, dim)
+            reward_vec,       # (n_threads, reward_dim) or None when use_rosa=False
         ) = data
 
         dones_env = torch.all(dones, axis=1)  # if all agents are done, then env is done
@@ -504,8 +655,12 @@ class OnPolicyBaseRunner:
             )
         # TODO: Figure out why share_obs, rewards, and masks have an extra dimension
         if self.state_type == "EP":
+            # When ROSA is active the V-critic expects augmented obs (obs ∥ reward_vec).
+            _share_obs_ep = share_obs[:, 0]
+            if self.use_rosa and reward_vec is not None:
+                _share_obs_ep = torch.cat([_share_obs_ep, reward_vec], dim=-1)
             self.critic_buffer.insert(
-                share_obs[:, 0],
+                _share_obs_ep,
                 rnn_states_critic,
                 values,
                 rewards[:, 0],
@@ -516,6 +671,24 @@ class OnPolicyBaseRunner:
             self.critic_buffer.insert(
                 share_obs, rnn_states_critic, values, rewards, masks, bad_masks
             )
+
+        # ROSA: insert reward_vec and joint actions into the rosa buffer.
+        # joint_actions: (n_threads, n_agents, act_dim) → (n_threads, n_agents * act_dim)
+        if self.use_rosa and reward_vec is not None:
+            joint_actions = actions.reshape(
+                self.algo_args["train"]["n_rollout_threads"], -1
+            )  # (n_threads, joint_act_dim)
+            if self.state_type == "EP":
+                self.rosa_critic_buffer.insert(
+                    share_obs[:, 0],
+                    rnn_states_critic,
+                    values,
+                    rewards[:, 0],
+                    masks[:, 0],
+                    bad_masks,
+                    reward_vec,
+                    joint_actions,
+                )
 
     def compute(self):
         """Compute returns and advantages.
@@ -541,6 +714,32 @@ class OnPolicyBaseRunner:
                 )
             self.critic_buffer.compute_returns(next_value, self.value_normalizer)
 
+            # ----------------------------------------------------------
+            # ROSA: compute 1-step TD targets for the Q-critic.
+            #
+            #   td_target_t = R_t + γ · V(s_{t+1}, r_t) · (1 − done_t)
+            #
+            # V(s_{t+1}, r_t) is already stored as value_preds[t+1] in the
+            # critic buffer (the V-critic runs on augmented obs every step).
+            # We de-normalise if value normalisation is active so that the
+            # targets are on the raw reward scale that the Q-critic predicts.
+            # ----------------------------------------------------------
+            if self.use_rosa:
+                gamma = self.critic_buffer.gamma
+                if self.value_normalizer is not None:
+                    v_next = self.value_normalizer.denormalize(
+                        self.critic_buffer.value_preds[1:]
+                    )
+                else:
+                    v_next = self.critic_buffer.value_preds[1:]
+
+                # masks[t+1] == 0 when the episode ended at step t (done=True)
+                td_targets = (
+                    self.critic_buffer.rewards
+                    + gamma * v_next * self.critic_buffer.masks[1:]
+                )  # (episode_length, n_rollout_threads, 1)
+                self.rosa_critic_buffer.set_td_targets(td_targets)
+
     def train(self):
         """Train the model."""
         raise NotImplementedError
@@ -553,6 +752,8 @@ class OnPolicyBaseRunner:
         for agent_id in range(self.num_agents):
             self.actor_buffer[agent_id].after_update()
         self.critic_buffer.after_update()
+        if self.use_rosa:
+            self.rosa_critic_buffer.after_update()
 
     @torch.no_grad()
     def eval(self):
@@ -793,12 +994,16 @@ class OnPolicyBaseRunner:
         for agent_id in range(self.num_agents):
             self.actor[agent_id].prep_rollout()
         self.critic.prep_rollout()
+        if self.use_rosa:
+            self.rosa_q_critic.prep_rollout()
 
     def prep_training(self):
         """Prepare for training."""
         for agent_id in range(self.num_agents):
             self.actor[agent_id].prep_training()
         self.critic.prep_training()
+        if self.use_rosa:
+            self.rosa_q_critic.prep_training()
 
     def save(self, directory):
         """Save model parameters or entire model based on self.save_entire_model."""
@@ -841,6 +1046,9 @@ class OnPolicyBaseRunner:
                         os.path.join(directory, "value_normalizer.pt"),
                     )
 
+        # ROSA Q-critic save (once, not per-agent)
+        if self.use_rosa:
+            self.rosa_q_critic.save(directory)
 
     def restore(self):
         """Restore model parameters or entire model based on self.save_entire_model."""
@@ -893,6 +1101,9 @@ class OnPolicyBaseRunner:
                 except Exception as e:
                     print(f"\033[31mCouldn’t load critic weights at {critic_path}: {e}\033[0m")
 
+        # ROSA Q-critic restore (once, not per-agent)
+        if self.use_rosa:
+            self.rosa_q_critic.restore(model_dir)
 
     def close(self):
         """Close environment, writter, and logger."""

@@ -128,7 +128,12 @@ class OnPolicyHARunner(OnPolicyBaseRunner):
             
             actor_train_infos.append(actor_train_info)
 
-        # update critic
+        # update V-critic
         critic_train_info = self.critic.train(self.critic_buffer, self.value_normalizer)
+
+        # update ROSA reward-conditioned Q-critic (if enabled)
+        if self.use_rosa:
+            rosa_train_info = self.rosa_q_critic.train(self.rosa_critic_buffer)
+            critic_train_info.update(rosa_train_info)
 
         return actor_train_infos, critic_train_info
