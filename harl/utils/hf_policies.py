@@ -1,3 +1,5 @@
+"""Sub-package containing utilities for common operations and helper functions."""
+
 HF_REPO_ID = "isaacwilliam4/isaaclab-harl-dataset"
 
 HF_POLICY_MAP = {
@@ -85,6 +87,7 @@ HF_POLICY_MAP = {
 
 
 def policies_summary(policy_map: dict) -> str:
+    # Build rows
     rows = []
     for env, info in policy_map.items():
         has_start = info.get("starting") is not None
@@ -93,6 +96,7 @@ def policies_summary(policy_map: dict) -> str:
 
     headers = ("Environment", "Starting", "Trained")
 
+    # Compute column widths
     w_env = max(len(headers[0]), *(len(r[0]) for r in rows)) if rows else len(headers[0])
     w_start = max(len(headers[1]), *(len(r[1]) for r in rows)) if rows else len(headers[1])
     w_train = max(len(headers[2]), *(len(r[2]) for r in rows)) if rows else len(headers[2])
@@ -103,9 +107,13 @@ def policies_summary(policy_map: dict) -> str:
     def fmt_row(a, b, c):
         return f"| {a:<{w_env}} | {b:<{w_start}} | {c:<{w_train}} |"
 
-    lines = ["Policy availability by environment:", sep("-"), fmt_row(*headers), sep("=")]
+    lines = []
+    lines.append("Policy availability by environment:")
+    lines.append(sep("-"))
+    lines.append(fmt_row(*headers))
+    lines.append(sep("="))
     for r in rows:
         lines.append(fmt_row(*r))
     lines.append(sep("-"))
-    return "\n" + "\n".join(lines)
 
+    return "\n" + "\n".join(lines)
