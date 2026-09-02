@@ -15,6 +15,7 @@ setup(
         "tensorboard>=2.2.1",
         "tensorboardX",
         "setproctitle",
+        "huggingface_hub>=0.24",
     ],
     classifiers=[
         "License :: OSI Approved :: MIT License",
