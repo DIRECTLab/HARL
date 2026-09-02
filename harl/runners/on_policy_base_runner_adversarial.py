@@ -21,6 +21,19 @@ from pathlib import Path
 from gymnasium.spaces import Box
 
 
+def _report_restore_issue(component, path, exc):
+    """Log a checkpoint component that could not be restored during ``restore``.
+
+    A missing file is expected when warm-starting from a partial checkpoint
+    (e.g. an actor-only "starting policy"), so it is shown as a yellow note;
+    any other failure is shown as a red error.
+    """
+    if isinstance(exc, FileNotFoundError):
+        print(f"\033[33m[restore] no {component} at {path}; training it from scratch\033[0m")
+    else:
+        print(f"\033[31m[restore] failed to load {component} at {path}: {exc}\033[0m")
+
+
 class OnPolicyBaseRunnerAdversarial:
     """Base runner for on-policy algorithms."""
 
@@ -936,10 +949,7 @@ class OnPolicyBaseRunnerAdversarial:
                     try:
                         self.actors[team][agent_id].actor = torch.load(actor_path, map_location=self.device)
                     except Exception as e:
-                        print(
-                            f"\033[31mCouldn’t load full actor for team={team}, agent={agent_id} "
-                            f"at {actor_path}: {e}\033[0m"
-                        )
+                        _report_restore_issue(f"full actor for team={team}, agent={agent_id}", actor_path, e)
 
             if not self.algo_args["render"]["use_render"]:
                 # --- Restore full critic models (map to self.device) ---
@@ -948,10 +958,7 @@ class OnPolicyBaseRunnerAdversarial:
                     try:
                         self.critics[team].critic = torch.load(critic_path, map_location=self.device)
                     except Exception as e:
-                        print(
-                            f"\033[31mCouldn’t load full critic for team={team} "
-                            f"at {critic_path}: {e}\033[0m"
-                        )
+                        _report_restore_issue(f"full critic for team={team}", critic_path, e)
 
                     # --- Restore full value normalizer (map to self.device) ---
                     if self.value_normalizers is not None:
@@ -959,10 +966,7 @@ class OnPolicyBaseRunnerAdversarial:
                         try:
                             self.value_normalizers[team] = torch.load(value_norm_path, map_location=self.device)
                         except Exception as e:
-                            print(
-                                f"\033[31mCouldn’t load full value normalizer for team={team} "
-                                f"at {value_norm_path}: {e}\033[0m"
-                            )
+                            _report_restore_issue(f"full value normalizer for team={team}", value_norm_path, e)
 
         else:
             # --- Restore from state_dict (load dicts onto CPU) ---
@@ -973,10 +977,7 @@ class OnPolicyBaseRunnerAdversarial:
                         state_dict = torch.load(actor_path, map_location=self.device)
                         actors[agent_id].actor.load_state_dict(state_dict)
                     except Exception as e:
-                        print(
-                            f"\033[31mCouldn’t load actor weights for team={team}, agent={agent_id} "
-                            f"at {actor_path}: {e}\033[0m"
-                        )
+                        _report_restore_issue(f"actor weights for team={team}, agent={agent_id}", actor_path, e)
 
             if not self.algo_args["render"]["use_render"]:
                 for team, critic in self.critics.items():
@@ -985,10 +986,7 @@ class OnPolicyBaseRunnerAdversarial:
                         state_dict = torch.load(critic_path, map_location=self.device)
                         critic.critic.load_state_dict(state_dict)
                     except Exception as e:
-                        print(
-                            f"\033[31mCouldn’t load critic weights for team={team} "
-                            f"at {critic_path}: {e}\033[0m"
-                        )
+                        _report_restore_issue(f"critic weights for team={team}", critic_path, e)
 
                     if self.value_normalizers is not None:
                         value_norm_path = os.path.join(model_dir, f"{team}_value_normalizer.pt")
@@ -996,10 +994,7 @@ class OnPolicyBaseRunnerAdversarial:
                             state_dict = torch.load(value_norm_path, map_location=self.device)
                             self.value_normalizers[team].load_state_dict(state_dict)
                         except Exception as e:
-                            print(
-                                f"\033[31mCouldn’t load value normalizer weights for team={team} "
-                                f"at {value_norm_path}: {e}\033[0m"
-                            )
+                            _report_restore_issue(f"value normalizer weights for team={team}", value_norm_path, e)
 
     def close(self):
         """Close environment, writter, and logger."""
